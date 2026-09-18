@@ -1,7 +1,6 @@
 # What happened on chain
 
-A run of `test/seed.mjs` against GenLayer Studio Dev on **2026-09-18**, 17:15:05
-to 17:20:56 UTC. Machine-readable form: [`evidence.json`](evidence.json). Raw
+A run of `test/seed.mjs` against GenLayer Studio Dev on **2026-09-18**, 17:54:23 to 17:59:50 UTC. Machine-readable form: [`evidence.json`](evidence.json). Raw
 console output: [`seed-run.log`](seed-run.log).
 
 **All checks passed.** What follows includes the things that were *not*
@@ -10,8 +9,8 @@ that says so.
 
 | | address |
 |---|---|
-| WillExecutor (canonical, 7–365 day intervals) | `0x4cf5a4a7A2AF1332541994C2C190213e5B696C02` |
-| WillExecutorDemo (same source, clock in seconds) | `0xe4b3fCF037432a9be193a88470D7E70e531ca426` |
+| WillExecutor (canonical, 7–365 day intervals) | `0xa3eF4Ee2a69b38d20866A80be054c79282b4c03e` |
+| WillExecutorDemo (same source, clock in seconds) | `0x766897eb88F5D7dbb2734A0501fA97eFDb3cd1d0` |
 
 ---
 
@@ -19,9 +18,9 @@ that says so.
 
 | id | owner → beneficiary | deposit | interval | watched chain | tx | settled |
 |---|---|---|---|---|---|---|
-| 1 | `0x7370…7Ebd` → `0xDbdF…e420` | 5 GEN | 30 days | ethereum | `0x9db819ad4c3136d1e6…` | 8s |
-| 2 | `0x150d…8FDb` → `0xE97A…769d` | 12 GEN | 90 days | base | `0xc3508a2995156796ef…` | 10s |
-| 3 | `0x6a34…a338` → `0x0dc1…F8F1` | 3 GEN | 365 days | arbitrum | `0x66453f0fbb540a8302…` | 12s |
+| 1 | `0x7370…7Ebd` → `0xDbdF…e420` | 5 GEN | 30 days | ethereum | `0xf0fc4bc5f987c62e47…` | 7s |
+| 2 | `0x150d…8FDb` → `0xE97A…769d` | 12 GEN | 90 days | base | `0x453c4b61a32e72b696…` | 7s |
+| 3 | `0x6a34…a338` → `0x0dc1…F8F1` | 3 GEN | 365 days | arbitrum | `0x0136192e659653b020…` | 9s |
 
 20 GEN locked. `get_stats` afterwards:
 
@@ -37,11 +36,11 @@ which is exactly why §3 onwards happens on the second instance.
 ## 2. A heartbeat, and a premature claim that is refused rather than reverted
 
 ```
-heartbeat(1)        last_heartbeat 1789751714 → 1789751748, count 1
-                    tx 0x4e3b9d3609ea1c435a…
+heartbeat(1)        last_heartbeat 1789754075 → 1789754100, count 1
+                    tx 0xe460a1e3d4648e8226…
 claim_inactive(1)   REJECTED — "will #1 is not overdue; it becomes claimable in 5183989s"
                     reverted: false
-                    tx 0x11d762740d4e7c12c1…
+                    tx 0xaaa2e5965155ad6db1…
 ```
 
 Three things were asserted about that refusal, and two of them were asserted
@@ -58,12 +57,21 @@ its threshold, and then its owner checked in.
 
 ```
 heartbeat(2)        OK
-claim_inactive(2)   REJECTED — "will #2 is not overdue; it becomes claimable in 113s"
+claim_inactive(2)   REJECTED — "will #2 is not overdue; it becomes claimable in 112s"
                     will #2: status ACTIVE, deposit 4.00 GEN, claim_attempts 0
 ```
 
 This is the case a timestamp-only dead man's switch gets right too. The next one
 is not.
+
+The assertion the script actually makes here is *"the estate survived"*, not
+*"a particular gate fired"* — because two different protections can save this
+will and which one does is a race against how fast Studio settles a transaction
+today. At a 60-second interval the heartbeat buys 120 seconds; on a slow run the
+claim lands after that window has reopened, a real round runs, and it declines
+to release instead. Both outcomes are correct. An earlier version of this check
+demanded the first one and reported a healthy contract as broken on a slow run —
+which is the failure mode a test suite must not have.
 
 ## 4. The consensus round
 
@@ -72,18 +80,24 @@ The probed wallet is the owner's own — `0x73700819747517EAD7aceBf4DE8211FE0E04
 and every validator independently fetched:
 
 ```
-https://eth.blockscout.com/api?module=account&action=txlist
+https://polygon.blockscout.com/api?module=account&action=txlist
     &address=0x73700819747517EAD7aceBf4DE8211FE0E047Ebd&sort=desc&page=1&offset=10
 ```
 
-**The wallet is a freshly generated key that has never signed anything on
-Ethereum mainnet**, so the live answer is genuine rather than mocked:
+Polygon rather than Ethereum for an operational reason that is itself part of
+the story: `eth.blockscout.com` rate-limits at roughly three rapid requests per
+IP, and a round fires one fetch *per validator* from one datacentre range, so
+repeated demo runs against one host walk into a 429 — which is, correctly,
+`INCONCLUSIVE`. See §7.
+
+**The wallet is a freshly generated key that has never signed anything on any
+of these chains**, so the live answer is genuine rather than mocked:
 
 ```json
 {"message":"No transactions found","result":[],"status":"0"}
 ```
 
-Settled in **13 seconds**, transaction `0x1a22d98b0a6d0d040e…`:
+Settled on the first attempt in **6 seconds**, transaction `0xf7e6f84a8eacde6cb8…`:
 
 | compared field | value |
 |---|---|
@@ -91,19 +105,19 @@ Settled in **13 seconds**, transaction `0x1a22d98b0a6d0d040e…`:
 | `age_bucket` | `7` — *over six months old, or absent entirely* |
 | `count_bucket` | `0` — *no signature was found at all* |
 | `src_ok` | `true` |
-| `content_hash` | `59230c3c62082da2` |
+| `content_hash` | `43feae0a7f5cd9d5` |
 
 Canonical projection the hash commits to:
 
 ```
-v1.0.0|will=1|chain=ethereum|wallet=0x73700819747517ead7acebf4de8211fe0e047ebd
-      |anchor=1789751770|now=1789751954|window=10|status=INACTIVE|age=7|count=0|src=1
+v1.0.0|will=1|chain=polygon|wallet=0x73700819747517ead7acebf4de8211fe0e047ebd
+      |anchor=1789754121|now=1789754305|window=10|status=INACTIVE|age=7|count=0|src=1
 ```
 
 Stored reasoning, composed from the agreed vector rather than written by the
 leader:
 
-> No sign of life: the ethereum explorer shows no transaction signed by this
+> No sign of life: the polygon explorer shows no transaction signed by this
 > wallet since the owner's last heartbeat. The newest signature is over six
 > months old, or absent entirely, and no signature was found at all in the last
 > 10 transactions examined. Inbound transfers were ignored: only a signature
@@ -137,8 +151,8 @@ network and no model:
 ## 6. Withdrawal, and the freeze
 
 ```
-claim_payout()  heir1    7.60 GEN   1 internal message posted   tx 0xde739709dc59d2e318…
-claim_payout()  finder   0.40 GEN   1 internal message posted   tx 0x3f421d9c8dedb7e51d…
+claim_payout()  heir1    7.60 GEN   1 internal message posted   tx 0xf161fc4761a5fc70f9…
+claim_payout()  finder   0.40 GEN   1 internal message posted   tx 0xa94dd420c87e144ac2…
 ```
 
 Exactly one internal transfer per payout, to the right address, for the right
@@ -196,11 +210,14 @@ it requires the explorer to be unavailable at the moment a round opens. It is
 nonetheless a routine occurrence rather than an edge case: `eth.blockscout.com`
 answers **HTTP 429 after roughly three rapid requests from one IP**, and a
 consensus round fires one fetch *per validator* simultaneously from one
-datacentre range. **An earlier run of this same script, against an earlier
-deploy, went `INCONCLUSIVE` for exactly this reason and the contract did the
-right thing**: nothing moved, the will stayed `ACTIVE` with its 8 GEN intact,
-and the recorded reason said *"Nothing was changed and this claim can be made
-again once the explorer answers."* `seed.mjs` therefore retries up to five times
+datacentre range. **Two earlier runs of this same script, against earlier deploys,
+went `INCONCLUSIVE` for exactly this reason — one of them five times in a row —
+and the contract did the right thing every time**: nothing moved, the will
+stayed `ACTIVE` with its 8 GEN intact, and the recorded reason said *"Nothing
+was changed and this claim can be made again once the explorer answers."* That
+is what moved the demo onto a less-hammered host; the contract needed no change,
+because declining to act on evidence it could not read is the behaviour, not a
+workaround for it. `seed.mjs` therefore retries up to five times
 with a 45-second back-off, and asserts on every `INCONCLUSIVE` round that state
 did not change.
 

@@ -39,7 +39,8 @@
 import { writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { createClient, createAccount } from "genlayer-js";
 import {
-  CHAINS, argOf, accounts, connect, fundOnStudio, gen, sleep, waitFinalized, returnedJson,
+  CHAINS, argOf, accounts, connect, fundOnStudio, gen, sleep, waitFinalized,
+  returnedJson, retry,
 } from "./harness.mjs";
 
 const networkName = argOf("network", "studiodev");
@@ -69,6 +70,19 @@ function ok(what, detail = "") { console.log(`  \x1b[32m✔\x1b[0m ${what}${deta
 function skip(what, why) { console.log(`  \x1b[33m-\x1b[0m ${what}  (skipped: ${why})`); }
 function bad(what, detail = "") { failures++; console.log(`  \x1b[31m✗\x1b[0m ${what}${detail ? "  " + detail : ""}`); }
 function head(t) { console.log(`\n\x1b[1m${t}\x1b[0m`); }
+
+/**
+ * Every balance read goes through `retry`.
+ *
+ * Studio intermittently answers an RPC with an HTML error page instead of JSON,
+ * which surfaces as `Unexpected token '<'`. A bare `read.getBalance` therefore
+ * throws and takes the whole run down — which is what happened on the run
+ * before this one, in step 0, after the deploy had already succeeded. The
+ * harness has a retry helper for exactly this; the balance reads were simply
+ * not using it.
+ */
+const balanceOf = (address) =>
+  retry(() => read.getBalance({ address }), { label: `balance ${address.slice(0, 10)}` });
 
 const clients = {};
 function at(address, role) {
@@ -105,7 +119,7 @@ for (const role of Object.keys(acc)) {
   await fundOnStudio(chain, acc[role].address, 200n * GEN);
 }
 for (const role of ["owner1", "owner2", "owner3", "finder"]) {
-  const bal = await read.getBalance({ address: acc[role].address });
+  const bal = await balanceOf(acc[role].address);
   console.log(`  ${role.padEnd(8)} ${acc[role].address}  ${gen(bal)} GEN`);
 }
 
@@ -203,11 +217,26 @@ head("4. The demo instance: the same source with the clock in seconds");
 const INTERVAL = 60;
 const DEPOSIT = 8n * GEN;
 
-const d1 = await statusOf(DEMO, "create_will", [acc.heir1.address, INTERVAL, "ethereum"], DEPOSIT, "owner1");
-if (d1.status === "OK" || d1.status === "UNREADABLE") ok(`will #1: ${gen(DEPOSIT)} GEN, ${INTERVAL}s interval, watching owner1 on ethereum`);
+/*
+ * WATCHED ON POLYGON, NOT ETHEREUM, AND THE REASON IS THE WHOLE POINT OF
+ * RULE 8.
+ *
+ * `eth.blockscout.com` rate-limits at roughly three rapid requests per IP, and
+ * a consensus round fires one fetch PER VALIDATOR simultaneously from one
+ * datacentre range. Repeated demo runs against the same host therefore walk
+ * straight into a 429, and a 429 is — correctly — INCONCLUSIVE. Spreading the
+ * demo onto a host this run has not been hammering is the operational answer;
+ * the contract's answer, which is the one that matters, is that it refuses to
+ * move an estate on evidence it could not read, however many times you ask.
+ *
+ * The wallet is dormant on every chain, so the verdict is unchanged.
+ */
+const WATCH = "polygon";
+const d1 = await statusOf(DEMO, "create_will", [acc.heir1.address, INTERVAL, WATCH], DEPOSIT, "owner1");
+if (d1.status === "OK" || d1.status === "UNREADABLE") ok(`will #1: ${gen(DEPOSIT)} GEN, ${INTERVAL}s interval, watching owner1 on ${WATCH}`);
 else bad("demo create_will #1", d1.json?.reason);
 
-const d2 = await statusOf(DEMO, "create_will", [acc.heir2.address, INTERVAL, "ethereum"], 4n * GEN, "owner2");
+const d2 = await statusOf(DEMO, "create_will", [acc.heir2.address, INTERVAL, WATCH], 4n * GEN, "owner2");
 if (d2.status === "OK" || d2.status === "UNREADABLE") ok(`will #2: 4 GEN, ${INTERVAL}s interval — this one's owner will check in and be saved`);
 else bad("demo create_will #2", d2.json?.reason);
 
@@ -231,22 +260,44 @@ else bad("owner2 heartbeat", saveHb.json?.reason);
 
 const savedClaim = await statusOf(DEMO, "claim_inactive", [2], 0n, "finder");
 const will2 = (await view(DEMO, "get_will", [2])).will;
-if (will2.status === "ACTIVE" && will2.deposit_gen === "4.00" && will2.evidence.claim_attempts === 0) {
-  ok("the claim against will #2 was refused — the timer was reset, and the 4 GEN is untouched");
-} else bad("will #2 changed", JSON.stringify(will2).slice(0, 160));
-if (savedClaim.status === "REJECTED") ok("and it said why", savedClaim.json.reason.slice(0, 60));
-else console.log(`  \x1b[33m-\x1b[0m the return value was unreadable (${savedClaim.status}); the state assertion above stands`);
+
+/*
+ * THE ASSERTION IS "THE ESTATE SURVIVED", not "a particular gate fired".
+ *
+ * Two different protections can save this will and which one does is a race
+ * against how fast Studio is settling transactions today. The interval here is
+ * 60s with a threshold of 2, so the heartbeat buys 120 seconds; on a slow run
+ * the claim can land AFTER that window has reopened, in which case a real
+ * consensus round runs and declines to release instead. Both outcomes are
+ * correct, and an earlier version of this check demanded the first one and
+ * reported a healthy contract as broken.
+ */
+if (will2.status === "ACTIVE" && will2.deposit_gen === "4.00") {
+  ok("will #2 survived: still ACTIVE, still holding all 4 GEN");
+} else bad("will #2 lost its estate", JSON.stringify(will2).slice(0, 200));
+
+if (savedClaim.status === "REJECTED") {
+  ok("the deadline gate refused it outright — the heartbeat reset the timer",
+     savedClaim.json.reason.slice(0, 60));
+} else if (will2.evidence.activity_status && will2.evidence.activity_status !== "INACTIVE") {
+  ok(`the window had reopened, so a real round ran and declined to release`,
+     `verdict ${will2.evidence.activity_status}`);
+} else if (savedClaim.status === "UNREADABLE") {
+  console.log(`  \x1b[33m-\x1b[0m return value unreadable; the state assertion above stands`);
+} else {
+  bad(`claim against a checked-in will returned ${savedClaim.status}`);
+}
 note({ step: "heartbeat_saves", will_id: 2, claim_status: savedClaim.status,
        reason: savedClaim.json?.reason ?? null, will_status: will2.status, deposit: will2.deposit_gen });
 
 // ---------------------------------------------------------------------------
 head("6. The consensus round: validators read Blockscout for themselves");
-const heir1Before = await read.getBalance({ address: acc.heir1.address });
-const finderBefore = await read.getBalance({ address: acc.finder.address });
-const contractBefore = await read.getBalance({ address: MAIN });
+const heir1Before = await balanceOf(acc.heir1.address);
+const finderBefore = await balanceOf(acc.finder.address);
+const contractBefore = await balanceOf(MAIN);
 
 console.log(`  the probed wallet is ${acc.owner1.address}`);
-console.log(`  every validator fetches https://eth.blockscout.com/api?module=account&action=txlist&address=${acc.owner1.address}…`);
+console.log(`  every validator independently fetches the ${WATCH} explorer for ${acc.owner1.address}…`);
 
 /*
  * RETRY ON INCONCLUSIVE — the path the contract is built around, exercised.
@@ -268,7 +319,7 @@ let will1 = null;
 let ev = null;
 const attempts = [];
 
-for (let attempt = 1; attempt <= 5; attempt++) {
+for (let attempt = 1; attempt <= 6; attempt++) {
   claim = await statusOf(DEMO, "claim_inactive", [1], 0n, "finder");
   will1 = (await view(DEMO, "get_will", [1])).will;
   ev = will1.evidence;
@@ -283,9 +334,12 @@ for (let attempt = 1; attempt <= 5; attempt++) {
     if (will1.status === "ACTIVE" && will1.deposit_gen === "8.00") {
       ok("INCONCLUSIVE moved nothing — the estate is exactly where it was (rule 8)");
     } else bad("an INCONCLUSIVE round changed state", JSON.stringify(will1).slice(0, 140));
-    if (attempt < 5) {
-      console.log(`      waiting 45s for the explorer's rate-limit window to roll over…`);
-      await sleep(45_000);
+    if (attempt < 6) {
+      // Back off further each time: a shared-IP rate limit needs the window to
+      // roll over, and hammering it is what caused the limit in the first place.
+      const wait = 60_000 + attempt * 30_000;
+      console.log(`      waiting ${wait / 1000}s for the explorer's rate-limit window to roll over…`);
+      await sleep(wait);
     }
     continue;
   }
@@ -369,8 +423,8 @@ if (released) {
   await waitFinalized(read, payFinder.out.hash, { label: "finder payout" });
 } else skip("the withdrawal path", "no release happened");
 
-const heir1After = await read.getBalance({ address: acc.heir1.address });
-const finderAfter = await read.getBalance({ address: acc.finder.address });
+const heir1After = await balanceOf(acc.heir1.address);
+const finderAfter = await balanceOf(acc.finder.address);
 const delivered = heir1After > heir1Before;
 
 /*

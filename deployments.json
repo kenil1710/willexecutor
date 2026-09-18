@@ -4,9 +4,9 @@
       "network": "studiodev",
       "chain_id": 61997,
       "WillExecutor": {
-        "address": "0x4cf5a4a7A2AF1332541994C2C190213e5B696C02",
-        "deploy_tx": "0x1b40a75591f211ada7d5a00e9936e639fa35d6bff478a774fb3118c9989ae24c",
-        "source_bytes": 104326,
+        "address": "0xa3eF4Ee2a69b38d20866A80be054c79282b4c03e",
+        "deploy_tx": "0x10a005f15df96746193776d60b9c98a2d8d86c567d72b3c706defbf10a067c76",
+        "source_bytes": 105663,
         "owner": "0xa5988601460eBEc7f751B328856842e719FA00a8",
         "rubric_version": "1.0.0",
         "min_interval_s": 604800,
@@ -15,13 +15,13 @@
         "missed_threshold": 2,
         "finder_fee_bps": 500,
         "stall_ttl_s": 172800,
-        "deployed_at": "2026-09-18T17:14:50.495Z"
+        "deployed_at": "2026-09-18T17:54:17.273Z"
       },
       "explorer": "https://explorer-studio-dev.genlayer.com/",
       "WillExecutorDemo": {
-        "address": "0xe4b3fCF037432a9be193a88470D7E70e531ca426",
-        "deploy_tx": "0xcabc4ec646452fc92c5b25e607fdd50ac91801f1d5576c55567a0747e3016e9e",
-        "source_bytes": 104326,
+        "address": "0x766897eb88F5D7dbb2734A0501fA97eFDb3cd1d0",
+        "deploy_tx": "0x28ac6181edcf2678231e866afab050c2c9d341a4e2488fb3b0661880d307f179",
+        "source_bytes": 105663,
         "owner": "0xa5988601460eBEc7f751B328856842e719FA00a8",
         "rubric_version": "1.0.0",
         "min_interval_s": 60,
@@ -30,7 +30,7 @@
         "missed_threshold": 2,
         "finder_fee_bps": 500,
         "stall_ttl_s": 300,
-        "deployed_at": "2026-09-18T17:15:02.683Z"
+        "deployed_at": "2026-09-18T17:54:23.589Z"
       }
     }
   }

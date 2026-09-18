@@ -420,7 +420,52 @@ if [ "$BYTES" -lt 200000 ]; then ok "contract is ${BYTES} bytes (Studio Dev has 
 else bad "contract is ${BYTES} bytes — past anything measured"; fi
 
 # ---------------------------------------------------------------------------
-sec "13. The live deploy"
+sec "13. The docs describe the contract that is actually deployed"
+# A README naming a dead address documents a contract nobody can open, and it
+# is the single easiest thing to get wrong after a redeploy.
+check "README and EVIDENCE.md carry the live addresses from deployments.json" python3 - <<'PY'
+import json, sys
+d = json.load(open("deployments.json"))["deployments"]["studiodev"]
+readme = open("README.md").read()
+ev = open("docs/EVIDENCE.md").read()
+missing = []
+for name in ("WillExecutor", "WillExecutorDemo"):
+    addr = d[name]["address"]
+    if addr not in readme:
+        missing.append(f"README missing {name} {addr}")
+    if addr not in ev:
+        missing.append(f"EVIDENCE.md missing {name} {addr}")
+for m in missing:
+    print(m)
+sys.exit(1 if missing else 0)
+PY
+
+check "the source on disk is the source that was deployed" python3 - <<'PY'
+import hashlib, json, os, sys
+# Written by tools/verify_artifact.mjs; absent means it has not been checked
+# since the last deploy, which is a fail rather than a skip.
+if not os.path.exists("docs/artifact-check.json"):
+    print("docs/artifact-check.json missing — run: node tools/verify_artifact.mjs")
+    sys.exit(1)
+rec = json.load(open("docs/artifact-check.json"))
+local = hashlib.sha256(open("contracts/WillExecutor.py", "rb").read().rstrip(b"\n")).hexdigest()
+if rec.get("source_sha256") != local:
+    print(f"source has changed since the last artifact check:\n  recorded {rec.get('source_sha256')}\n  on disk  {local}")
+    sys.exit(1)
+d = json.load(open("deployments.json"))["deployments"]["studiodev"]
+for name in ("WillExecutor", "WillExecutorDemo"):
+    got = rec.get("contracts", {}).get(name, {})
+    if got.get("address") != d[name]["address"]:
+        print(f"{name}: checked {got.get('address')} but deployments.json says {d[name]['address']}")
+        sys.exit(1)
+    if not got.get("match"):
+        print(f"{name}: deployed bytes do NOT match the local source")
+        sys.exit(1)
+sys.exit(0)
+PY
+
+# ---------------------------------------------------------------------------
+sec "14. The live deploy"
 if [ "$WITH_CHAIN" -eq 0 ]; then
   skp "on-chain assertions" "pass --chain to run them"
 elif [ ! -f deployments.json ]; then

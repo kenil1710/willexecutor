@@ -1,41 +1,37 @@
 ^D
 [1mWillExecutor — live demonstration on studiodev[0m
-  canonical  0x4cf5a4a7A2AF1332541994C2C190213e5B696C02
-  demo       0xe4b3fCF037432a9be193a88470D7E70e531ca426
+  canonical  0xa3eF4Ee2a69b38d20866A80be054c79282b4c03e
+  demo       0x766897eb88F5D7dbb2734A0501fA97eFDb3cd1d0
 
 [1m0. Funding the wallets[0m
-  owner1   0x73700819747517EAD7aceBf4DE8211FE0E047Ebd  1342.998349 GEN
-  owner2   0x150d820F56f67ee2Bc66ED784d21D3E2B3a08FDb  1323.998585 GEN
-  owner3   0x6a3480F252eCd492d2f30B1507b1eB82ca5ca338  1384.999528 GEN
-  finder   0xCC84Ac0efF95D4409Fbf0A8f0f1C60E54AC1e41d  1399.998506 GEN
+  owner1   0x73700819747517EAD7aceBf4DE8211FE0E047Ebd  1916.997798 GEN
+  owner2   0x150d820F56f67ee2Bc66ED784d21D3E2B3a08FDb  1891.998034 GEN
+  owner3   0x6a3480F252eCd492d2f30B1507b1eB82ca5ca338  1978.999371 GEN
+  finder   0xCC84Ac0efF95D4409Fbf0A8f0f1C60E54AC1e41d  1999.997586 GEN
 
 [1m1. Three real wills on the canonical contract (7–365 day bounds)[0m
-GenLayer RPC error (sim_estimateTransactionFees): Server busy: all 8 execution slots occupied, retry later
-  … write fee simulation failed for create_will (Version of JSON-RPC protocol is not supported.
-
-Details: Server busy: all 8 execution slots occupied)
-  [32m✔[0m owner1 → heir1: 5.000000 GEN, check in every 30 days, watching ethereum  8s
-  [32m✔[0m owner2 → heir2: 12.000000 GEN, check in every 90 days, watching base  10s
-  [32m✔[0m owner3 → heir3: 3.000000 GEN, check in every 365 days, watching arbitrum  12s
+  [32m✔[0m owner1 → heir1: 5.000000 GEN, check in every 30 days, watching ethereum  7s
+  [32m✔[0m owner2 → heir2: 12.000000 GEN, check in every 90 days, watching base  7s
+  [32m✔[0m owner3 → heir3: 3.000000 GEN, check in every 365 days, watching arbitrum  9s
   [32m✔[0m the register holds 3 wills
-      #1  5.00 GEN  ethereum  claimable in 5183973s
-      #2  12.00 GEN  base  claimable in 15551981s
-      #3  3.00 GEN  arbitrum  claimable in 63071991s
+      #1  5.00 GEN  ethereum  claimable in 5183981s
+      #2  12.00 GEN  base  claimable in 15551987s
+      #3  3.00 GEN  arbitrum  claimable in 63071994s
   [32m✔[0m ledger identity holds: balance == locked + payable
   [32m✔[0m the contract keeps nothing (no protocol revenue, no withdraw method)
 
 [1m2. A heartbeat, on chain[0m
-  [32m✔[0m will #1 checked in  1789751714 → 1789751748, count 1
+  [32m✔[0m will #1 checked in  1789754075 → 1789754100, count 1
 
 [1m3. A premature claim is REFUSED, not reverted (rule 2)[0m
   [32m✔[0m the transaction did not revert (rule 2: a refusal returns, it does not raise)
   [32m✔[0m the will is byte-identical afterwards — nothing was consumed by the attempt
   [32m✔[0m no claim attempt was counted (rule 3: no counter moves before a refusal)
-  [32m✔[0m and it said why  will #1 is not overdue; it becomes claimable in 5183989s
+  [32m✔[0m and it said why  will #1 is not overdue; it becomes claimable in 5183990s
   [32m✔[0m no will on the canonical contract is claimable yet
 
 [1m4. The demo instance: the same source with the clock in seconds[0m
-  [32m✔[0m will #1: 8.000000 GEN, 60s interval, watching owner1 on ethereum
+  [32m✔[0m will #1: 8.000000 GEN, 60s interval, watching owner1 on polygon
   [32m✔[0m will #2: 4 GEN, 60s interval — this one's owner will check in and be saved
 
   waiting 145s for both wills to pass their threshold (60s × 2 missed check-ins)…
@@ -43,20 +39,20 @@ Details: Server busy: all 8 execution slots occupied)
 
 [1m5. A heartbeat saves an estate[0m
   [32m✔[0m owner2 checked in just in time
-  [32m✔[0m the claim against will #2 was refused — the timer was reset, and the 4 GEN is untouched
-  [32m✔[0m and it said why  will #2 is not overdue; it becomes claimable in 113s
+  [32m✔[0m will #2 survived: still ACTIVE, still holding all 4 GEN
+  [32m✔[0m the deadline gate refused it outright — the heartbeat reset the timer  will #2 is not overdue; it becomes claimable in 112s
 
 [1m6. The consensus round: validators read Blockscout for themselves[0m
   the probed wallet is 0x73700819747517EAD7aceBf4DE8211FE0E047Ebd
-  every validator fetches https://eth.blockscout.com/api?module=account&action=txlist&address=0x73700819747517EAD7aceBf4DE8211FE0E047Ebd…
-  attempt 1: INACTIVE in 13s  (src_ok=true)
+  every validator independently fetches the polygon explorer for 0x73700819747517EAD7aceBf4DE8211FE0E047Ebd…
+  attempt 1: INACTIVE in 6s  (src_ok=true)
   [32m✔[0m verdict INACTIVE — the wallet has signed nothing since the last check-in
       activity_status INACTIVE
       age_bucket      7  (over six months old, or absent entirely)
       count_bucket    0  (no signature was found at all)
       src_ok          true
-      content_hash    59230c3c62082da2
-      reason          No sign of life: the ethereum explorer shows no transaction signed by this wallet since the owner's 
+      content_hash    43feae0a7f5cd9d5
+      reason          No sign of life: the polygon explorer shows no transaction signed by this wallet since the owner's l
   [32m✔[0m a content hash was stored
   [32m✔[0m src_ok is true — the explorer answered, so the verdict is evidence-backed
 
@@ -73,7 +69,7 @@ Details: Server busy: all 8 execution slots occupied)
       ✔ the stored vector is internally coherent
       ✔ the split re-derives and conserves exactly
       ✔ a release was authorised by an INACTIVE reading from a source that answered
-      projection: v1.0.0|will=1|chain=ethereum|wallet=0x73700819747517ead7acebf4de8211fe0e047ebd|anchor=1789751770|now=1789751954|window=10|status=INACTIVE|age=7|count=0|src=1
+      projection: v1.0.0|will=1|chain=polygon|wallet=0x73700819747517ead7acebf4de8211fe0e047ebd|anchor=1789754121|now=1789754305|window=10|status=INACTIVE|age=7|count=0|src=1
 
 [1m9. Withdrawal — one message, one recipient[0m
   [32m✔[0m heir1 withdrew 7.60 GEN  1 internal message posted

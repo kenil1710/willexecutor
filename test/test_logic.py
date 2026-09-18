@@ -2148,6 +2148,52 @@ class TestTopUp(Base):
         self.assertEqual(out["status"], "REJECTED")
         self.ledger(c)
 
+    def test_refused_while_a_claim_is_in_flight(self):
+        """THE BUG THIS TEST EXISTS FOR. `top_up` was the one owner method that
+        could touch a will while a claim was in flight — and it both changes
+        `deposit_wei` (the amount a settlement pays) and resets
+        `last_heartbeat` (the anchor the validators measured against). Its two
+        siblings were gated; it was not."""
+        c = self.make(stall_ttl_s=600)
+        self.make_will(c, deposit=10 * GEN)
+        c.claiming["1"] = NOW
+        out = self.call(c, ALICE, "top_up", 1, value=GEN)
+        self.assertEqual(out["status"], "REJECTED")
+        self.assertIn("in flight", out["reason"])
+        self.ledger(c)
+
+    def test_an_in_flight_top_up_cannot_move_the_anchor(self):
+        """The griefing shape: escape a stalled claim for one wei by resetting
+        the timer for another two intervals."""
+        c = self.make(stall_ttl_s=600)
+        self.make_will(c, days=1)
+        anchor = int(c.wills[0].last_heartbeat)
+        c.claiming["1"] = NOW
+        # Inside the stall TTL: the claim is genuinely in flight. (Past the TTL
+        # the gate SHOULD let a top-up through — that case is the test below.)
+        set_now(NOW + 300)
+        out = self.call(c, ALICE, "top_up", 1, value=GEN)
+        self.assertEqual(out["status"], "REJECTED")
+        self.assertEqual(int(c.wills[0].last_heartbeat), anchor)
+        self.assertEqual(int(c.wills[0].deposit_wei), 10 * GEN)
+
+    def test_a_refused_in_flight_top_up_is_refundable(self):
+        c = self.make(stall_ttl_s=600)
+        self.make_will(c)
+        c.claiming["1"] = NOW
+        self.call(c, ALICE, "top_up", 1, value=2 * GEN)
+        self.assertEqual(self.owed(c, ALICE), 2 * GEN)
+        self.ledger(c)
+
+    def test_allowed_once_the_claim_has_stalled(self):
+        c = self.make(stall_ttl_s=600)
+        self.make_will(c, deposit=10 * GEN)
+        c.claiming["1"] = NOW
+        set_now(NOW + 601)
+        self.assertEqual(self.call(c, ALICE, "top_up", 1, value=GEN)["status"],
+                         "OK")
+        self.assertEqual(int(c.wills[0].deposit_wei), 11 * GEN)
+
     def test_paused_blocks_top_up(self):
         c = self.make()
         self.make_will(c)
@@ -3776,6 +3822,31 @@ class TestSourceInvariants(Base):
         m = _TreeMap[str, int]()
         self.assertEqual(m.get("absent"), 0)
         self.assertIsNotNone(m.get("absent"))
+
+    def test_every_owner_method_that_mutates_a_will_is_gated_on_an_in_flight_claim(self):
+        """`top_up` shipped without this gate while its two siblings had it.
+        Enumerate rather than remember: any owner-only method that writes to a
+        will must consult `_claim_open`, or a live round can have the thing it
+        is deciding about move underneath it.
+
+        `heartbeat` is the deliberate exception and is named as one — it moves
+        the anchor for the NEXT round on purpose, and NOTES.md §8 explains why
+        it must not clear a marker either."""
+        EXPECTED = {"top_up", "cancel_will", "change_beneficiary"}
+        gated = set()
+        for node in ast.walk(TREE):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            if not any(ast.unparse(d).startswith("gl.public.write")
+                       for d in node.decorator_list):
+                continue
+            src = ast.unparse(node)
+            if "_claim_open" in src and node.name != "claim_inactive" \
+                    and node.name != "settle_stalled":
+                gated.add(node.name)
+        self.assertEqual(gated, EXPECTED,
+                         "owner methods gated on an in-flight claim: "
+                         + str(sorted(gated)))
 
     def test_contract_is_under_the_size_ceiling(self):
         """Studio Dev has taken 121 KB (measured). A previous project measured

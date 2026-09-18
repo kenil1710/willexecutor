@@ -1560,6 +1560,30 @@ class WillExecutor(gl.contract.Contract):
         if will.owner != sender:
             return self._refuse("only the owner of will #"
                                 + str(int(will.will_id)) + " can top it up")
+
+        # Refused while a claim is in flight, for the same reason `cancel_will`
+        # and `change_beneficiary` are.
+        #
+        # A top-up does two things a live round must not have moving underneath
+        # it: it changes `deposit_wei`, which is the amount a settlement pays
+        # out, and it RESETS `last_heartbeat`, which is the anchor the
+        # validators measured against. Leaving this ungated made `top_up` the
+        # one owner method that could move the anchor during the window a stuck
+        # marker holds open — so an owner could escape a stalled claim for the
+        # price of one wei, while the two sibling methods that touch the same
+        # will were refused. `heartbeat` deliberately does not clear a marker
+        # either (see NOTES.md §8); this closes the same door on the payable
+        # path.
+        wid = int(will.will_id)
+        started = self._claim_open(wid)
+        if started > 0 and now - started < int(self.stall_ttl_s):
+            return self._refuse(
+                "a claim on will #" + str(wid) + " is in flight; it must "
+                "resolve, or be cleared with settle_stalled(" + str(wid)
+                + "), before this will can be topped up",
+                {"claim_started_at": started,
+                 "stalls_at": started + int(self.stall_ttl_s)})
+
         if value <= 0:
             return self._refuse("send some GEN to top up with")
         new_total = int(will.deposit_wei) + value

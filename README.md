@@ -47,8 +47,8 @@ outside world and having to agree about what they saw.**
 
 | | address |
 |---|---|
-| **WillExecutor** (canonical — the brief: 7–365 day intervals) | [`0x4cf5a4a7A2AF1332541994C2C190213e5B696C02`](https://explorer-studio-dev.genlayer.com/) |
-| **WillExecutorDemo** (same source, clock in seconds) | [`0xe4b3fCF037432a9be193a88470D7E70e531ca426`](https://explorer-studio-dev.genlayer.com/) |
+| **WillExecutor** (canonical — the brief: 7–365 day intervals) | [`0xa3eF4Ee2a69b38d20866A80be054c79282b4c03e`](https://explorer-studio-dev.genlayer.com/) |
+| **WillExecutorDemo** (same source, clock in seconds) | [`0x766897eb88F5D7dbb2734A0501fA97eFDb3cd1d0`](https://explorer-studio-dev.genlayer.com/) |
 
 Two instances because the canonical contract is correct and completely
 un-watchable: the earliest a release could be demonstrated on it is fourteen
@@ -142,7 +142,7 @@ everybody's payout.
 |---|---|---|
 | `create_will(beneficiary, check_in_days, chain)` | anyone | payable — the GEN sent is the estate. 7–365 days, beneficiary ≠ self, one active will per wallet |
 | `heartbeat(will_id)` | owner | free, resets the timer, works while paused |
-| `top_up(will_id)` | owner | payable; also counts as a check-in |
+| `top_up(will_id)` | owner | payable; counts as a check-in; refused while a claim is in flight |
 | `claim_inactive(will_id)` | **anyone** | opens the consensus round; 5% finder fee on a release |
 | `cancel_will(will_id)` | owner | returns the whole deposit; works while paused |
 | `change_beneficiary(will_id, new)` | owner | refused while a claim is in flight |
@@ -201,8 +201,8 @@ reasoning in [`contracts/NOTES.md`](contracts/NOTES.md); executable form in
 ## Running it
 
 ```bash
-python3 test/test_logic.py     # 440 offline tests — no chain, no network, stdlib only
-./tools/audit.sh               # 38 static checks, each one a past rejection
+python3 test/test_logic.py     # 445 offline tests — no chain, no network, stdlib only
+./tools/audit.sh               # 40 static checks, each one a past rejection
 ./tools/audit.sh --chain       # and assert the live deploy
 
 cd test && npm install
@@ -224,10 +224,11 @@ records nothing because on the real runner it posts no message.
 ```
 contracts/WillExecutor.py   the contract — ten rules in the header, reasoning in NOTES.md
 contracts/NOTES.md          design notes and every hazard worth knowing
-test/test_logic.py          440 offline tests + the runtime stub
+test/test_logic.py          445 offline tests + the runtime stub
 test/deploy.mjs             deploys both instances, records deployments.json
 test/seed.mjs               the live demonstration
-tools/audit.sh              38 static checks
+tools/audit.sh              40 static checks
 tools/audit_chain.mjs       asserts the live contracts, not the source
+tools/verify_artifact.mjs   proves the deployed bytes are this source
 docs/EVIDENCE.md            what happened on chain, including what did not
 ```

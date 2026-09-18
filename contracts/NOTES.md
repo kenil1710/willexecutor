@@ -358,10 +358,31 @@ read the chain.
 
 The heartbeat still counts — it moves `last_heartbeat`, so the *next* claim
 measures against the new anchor — and the in-flight round answers the question
-it was actually asked. `cancel_will` and `change_beneficiary` are refused
-outright while a claim is in flight, because a will that evaporated or
-redirected underneath a round would leave the validators authorising a payout to
-somebody who is no longer the beneficiary.
+it was actually asked. `cancel_will`, `change_beneficiary` **and `top_up`** are
+refused outright while a claim is in flight, because a will that evaporated,
+redirected or re-anchored underneath a round would leave the validators
+authorising a payout against facts that have since moved.
+
+### `top_up` was the gap, and it was found in the submission audit
+
+`top_up` shipped without that gate while both of its siblings had it — and it is
+the worst of the three to leave open, because it changes **two** things a live
+round depends on: `deposit_wei`, which is the amount a settlement pays out, and
+`last_heartbeat`, which is the anchor the validators measured against.
+
+Within a single `claim_inactive` transaction there is no window — the marker is
+set, the round runs and the marker is cleared without anything else
+interleaving. The exposure is the window a **stuck** marker holds open, which is
+exactly the window `settle_stalled` exists for: during it an owner could reset
+their own timer for another two intervals for the price of one wei, while the
+two sibling methods touching the same will were refused.
+
+The fix is the same three-line gate the siblings use. The lesson is that the
+inconsistency was invisible when reading any one method — it only showed up when
+the three were listed side by side — so
+`test_every_owner_method_that_mutates_a_will_is_gated_on_an_in_flight_claim`
+now enumerates them from the AST and fails if they drift apart again. `heartbeat`
+is the deliberate exception and is named as one in that test.
 
 ---
 
