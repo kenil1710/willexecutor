@@ -12,6 +12,12 @@ Blockscout** and votes on what it found. If your wallet has *signed* anything
 since your last check-in, you are alive, the claim fails, and nothing moves —
 however many check-ins you missed.
 
+That is not a design sketch. Both halves are on chain: a dormant wallet's estate
+released in [tx `0xf7e6f84a…`](docs/EVIDENCE.md), and a wallet that had signed
+one Sepolia transaction after its anchor keeping its 6 GEN in
+[tx `0xc5af390a…`](docs/EVIDENCE.md) — verdict `ALIVE`, settled in 16 seconds,
+with the validators reporting how many signatures they counted.
+
 ---
 
 ## Why this needs GenLayer
@@ -121,12 +127,12 @@ to guess.
 
 Every ambiguity resolves towards **not moving the money**:
 
-| what happened | verdict | what moves |
-|---|---|---|
-| wallet signed something after the last check-in | `ALIVE` | nothing |
-| wallet signed nothing, explorer answered | `INACTIVE` | estate released |
-| explorer 429 / 5xx / unparseable / `result: null` | `INCONCLUSIVE` | nothing — retry later |
-| validators disagree | *no round* | nothing — retry later |
+| what happened | verdict | what moves | demonstrated on chain |
+|---|---|---|---|
+| wallet signed something after the last check-in | `ALIVE` | nothing | [tx `0xc5af390a…`](docs/EVIDENCE.md) |
+| wallet signed nothing, explorer answered | `INACTIVE` | estate released | [tx `0xf7e6f84a…`](docs/EVIDENCE.md) |
+| explorer 429 / 5xx / unparseable / `result: null` | `INCONCLUSIVE` | nothing — retry later | yes, repeatedly |
+| validators disagree | *no round* | nothing — retry later | offline suite |
 
 `INCONCLUSIVE` is **on the consensus axis**, deliberately: validators must
 *agree* the source was unavailable, or one node's bad minute silently becomes
@@ -209,6 +215,7 @@ cd test && npm install
 node accounts.mjs              # a stable pool of signing keys
 node deploy.mjs --both         # canonical + demo instance
 node seed.mjs                  # the full live lifecycle, writing docs/evidence.json
+node alive-reset.mjs && node alive.mjs   # the ALIVE path, end to end (~6 min)
 ```
 
 The offline suite needs nothing installed. It drives the real contract class
@@ -226,7 +233,9 @@ contracts/WillExecutor.py   the contract — ten rules in the header, reasoning 
 contracts/NOTES.md          design notes and every hazard worth knowing
 test/test_logic.py          445 offline tests + the runtime stub
 test/deploy.mjs             deploys both instances, records deployments.json
-test/seed.mjs               the live demonstration
+test/seed.mjs               the live demonstration (INACTIVE → release)
+test/alive.mjs              the ALIVE demonstration (signature after the anchor → nothing moves)
+test/alive-reset.mjs        resets it so the evidence run is one clean invocation
 tools/audit.sh              40 static checks
 tools/audit_chain.mjs       asserts the live contracts, not the source
 tools/verify_artifact.mjs   proves the deployed bytes are this source

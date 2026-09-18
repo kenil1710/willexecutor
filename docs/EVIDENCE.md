@@ -191,19 +191,9 @@ sitting in somebody's claimable balance. There is no third bucket.
 
 ## 7. What was *not* demonstrated on chain, and why
 
-**The `ALIVE` verdict.** It needs a wallet that has signed a transaction on a
-public chain *and* whose key can sign on GenLayer. Every wallet in this run is a
-freshly generated key with no mainnet history — deliberately, because that is
-precisely what makes the `INACTIVE` reading in §4 genuine rather than mocked.
-The two requirements are in direct tension and cannot both be satisfied without
-spending real mainnet gas from a test key.
-
-`ALIVE` is proved in `test/test_logic.py` against Blockscout responses in the
-real upstream shape, including the case that matters most — a wallet buried in
-**ten inbound transfers** that must still read `INACTIVE`, because only a
-signature proves life. The deterministic half of the same protection *was*
-demonstrated on chain, in §3: a will that has been checked in on cannot be
-claimed at all.
+**~~The `ALIVE` verdict.~~ DEMONSTRATED — see §9.** This section previously
+recorded ALIVE as unprovable on chain. That was true of the wallets in the main
+run and is no longer true of the contract's evidence base; §9 is the proof.
 
 **The `INCONCLUSIVE` verdict**, on this run. It cannot be produced on demand —
 it requires the explorer to be unavailable at the moment a round opens. It is
@@ -251,3 +241,118 @@ passed. If you regenerate the keys you get *different* dormant wallets, which is
 fine — but if you reuse wallets that have since transacted on the chain a will
 names, the honest verdict becomes `ALIVE` and no release will happen. That is
 the contract working.
+
+---
+
+## 9. The ALIVE verdict, on chain
+
+`test/alive.mjs`, one invocation, 2026-09-18 19:02:23 → 19:15:35 UTC.
+Machine-readable: [`alive-evidence.json`](alive-evidence.json). Console:
+[`alive-run.log`](alive-run.log).
+
+### Why it took a different setup
+
+The validators probe the will's **owner** — nobody can point them at a wallet
+they do not control — and `create_will` must be signed by that owner. So ALIVE
+needs one wallet that both holds a signable key *and* has genuine outbound
+history on an allowlisted chain. Every wallet in §1–§6 is a freshly generated
+key with no history anywhere, which is exactly what makes the INACTIVE reading
+there genuine, and exactly why it cannot produce an ALIVE.
+
+`sepolia` is in the allowlist, so the resolution is to use a wallet funded
+there and create the signature *after* the anchor is fixed. The key used is
+**testnet-only** — the script asserts a zero balance on ethereum, base,
+arbitrum and polygon mainnets before it will run — and it is read at run time
+from an existing dev `.env`, never copied, printed or committed.
+
+### The sequence, in order
+
+| step | fact |
+|---|---|
+| before | the wallet's newest signature is `1789757688`; nothing newer exists |
+| **create_will** | `0x5dbe233c35274a48f43a6bdf018d297d3fe60b82af2d218fda26e950e581d938` → **will #6**, 6 GEN, 90 s interval, watching `sepolia` |
+| anchor | `last_heartbeat = 1789758155`, claimable at `1789758335` |
+| assertion | *every existing signature is OLDER than the anchor* — so nothing yet says ALIVE |
+| **sepolia tx** | `0xec39fa7ea1169b6abcc0314fb8d714bdf4d4a0044809d19f45f8c2f96f0959ca`, block `11732605`, status success |
+| indexed | Blockscout reports it at `1789758168` — **13 s after the anchor** |
+| threshold | expires; the owner deliberately does **not** check in |
+| **claim_inactive** | `0xc5af390ae344f318bd13d6f0df120cefc69de56d7692c1fa645c600be20de82e` |
+
+The order is the point. The anchor is fixed *before* the signature exists, so
+the only way a validator can answer ALIVE is by actually fetching the wallet's
+history and finding something newer than a timestamp that was already on chain.
+
+### The verdict
+
+Settled in **16 seconds**, first attempt:
+
+| compared field | value |
+|---|---|
+| `activity_status` | **`ALIVE`** |
+| `age_bucket` | `0` — *less than a day old* |
+| `count_bucket` | `3` — *four to seven signatures were found* |
+| `src_ok` | `true` |
+| `content_hash` | `b3698b76cf9fc279` |
+
+```
+v1.0.0|will=6|chain=sepolia|wallet=0xbe9ee23694b69d287fbe096ab3e37f61cff7b802
+      |anchor=1789758155|now=1789758493|window=10|status=ALIVE|age=0|count=3|src=1
+```
+
+> Still alive: this wallet signed at least one transaction AFTER the owner's
+> last heartbeat, according to the sepolia explorer. The newest signature is
+> less than a day old, and four to seven signatures were found in the last 10
+> transactions examined. Missing a check-in is not the same as being gone, so
+> the deposit stays where it is.
+
+`count_bucket = 3` matters as much as the verdict: the validators did not just
+answer "alive", they **counted signatures**, and the count is on the compared
+axis. An answer nobody could have produced without reading the chain.
+
+### And the money did not move
+
+```
+will #6 status            ACTIVE      (not EXECUTED)
+deposit                   6.000000 GEN, unchanged
+contract locked total     6000000000000000000 → 6000000000000000000
+paid to beneficiary       0
+paid to finder            0
+beneficiary owed          0
+ledger identity           holds
+verdict counters          alive=3  inactive=1  inconclusive=0
+```
+
+**The owner missed every check-in and the estate stayed locked**, because the
+wallet was still signing. That is the half a timestamp-only dead man's switch
+cannot do, and it is now a transaction anyone can look up rather than a claim
+in a README.
+
+### Two things this run also showed, unplanned
+
+**A 429 is not a verdict.** The polling loop that waits for Blockscout to index
+the transaction tripped the explorer's rate limit — roughly three requests per
+window per IP — on several attempts. The script reports those as *"the explorer
+did not answer — rate limited, which is NOT 'no transaction'"* and keeps them
+out of its conclusions, which is the same distinction `_parse` enforces inside
+the contract: a 429 carries `result: null`, so it can only ever produce
+`INCONCLUSIVE`, never a payout.
+
+**The observer's quota is not the validators'.** The local confirmation check is
+advisory for exactly this reason: the validators fetch from their own address
+range during the round, so a laptop that cannot currently read Blockscout says
+nothing about whether they can. Aborting on it would be letting the observer's
+rate limit decide the experiment.
+
+### Re-running it
+
+```bash
+cd test
+node alive-reset.mjs   # cancel the owner's active will, withdraw the refund
+node alive.mjs         # create, sign on sepolia, wait, claim — ~6 minutes
+```
+
+`alive.mjs` is resumable, which is right for recovering a half-finished run but
+wrong for producing evidence: a resumed run reuses a will whose post-anchor
+signature it had already sent, so the ordering that makes the result meaningful
+is not visible in that run's own log. `alive-reset.mjs` exists so the evidence
+run can be a single clean invocation — which is what the table above is.

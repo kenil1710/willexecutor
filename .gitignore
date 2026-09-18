@@ -15,3 +15,4 @@ HANDOVER.md
 
 # The seed log is EVIDENCE and belongs in the repo, unlike build noise.
 !docs/seed-run.log
+!docs/alive-run.log
