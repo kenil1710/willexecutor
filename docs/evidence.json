@@ -1,0 +1,410 @@
+{
+  "network": "studiodev",
+  "started_at": "2026-09-18T17:15:05.674Z",
+  "main": "0x4cf5a4a7A2AF1332541994C2C190213e5B696C02",
+  "demo": "0xe4b3fCF037432a9be193a88470D7E70e531ca426",
+  "steps": [
+    {
+      "step": "create_will",
+      "owner": "0x73700819747517EAD7aceBf4DE8211FE0E047Ebd",
+      "beneficiary": "0xDbdFc00D959b596497629a7bEa89bec96B5De420",
+      "days": 30,
+      "chain": "ethereum",
+      "deposit_wei": "5000000000000000000",
+      "status": "OK",
+      "will_id": 1,
+      "tx": "0x9db819ad4c3136d1e6636d88c01d3876e09d268ee43b9e06cd59f19f81032414",
+      "seconds": 7.647
+    },
+    {
+      "step": "create_will",
+      "owner": "0x150d820F56f67ee2Bc66ED784d21D3E2B3a08FDb",
+      "beneficiary": "0xE97A9C9053EdAb3EB900d09db36e490bED65769d",
+      "days": 90,
+      "chain": "base",
+      "deposit_wei": "12000000000000000000",
+      "status": "OK",
+      "will_id": 2,
+      "tx": "0xc3508a2995156796ef26f571f018a7f4119efe61eda35f22ab66aa9947c4b319",
+      "seconds": 10.112
+    },
+    {
+      "step": "create_will",
+      "owner": "0x6a3480F252eCd492d2f30B1507b1eB82ca5ca338",
+      "beneficiary": "0x0dc1725644ADE1042Ab6714d45CE6674F334F8F1",
+      "days": 365,
+      "chain": "arbitrum",
+      "deposit_wei": "3000000000000000000",
+      "status": "OK",
+      "will_id": 3,
+      "tx": "0x66453f0fbb540a8302dfe9539e3a8cf1ae31e0ba94ad98a9f59bde853d704a33",
+      "seconds": 12.472
+    },
+    {
+      "step": "stats_after_creation",
+      "stats": {
+        "total_wills": 3,
+        "active": 3,
+        "executed": 0,
+        "cancelled": 0,
+        "claims_attempted": 0,
+        "verdicts": {
+          "alive": 0,
+          "inactive": 0,
+          "inconclusive": 0
+        },
+        "rejected_calls": 0,
+        "ledger": {
+          "balance_wei": "20000000000000000000",
+          "balance_gen": "20.00",
+          "locked_wei": "20000000000000000000",
+          "locked_gen": "20.00",
+          "payable_wei": "0",
+          "payable_gen": "0.00",
+          "identity_holds": true,
+          "identity": "balance_wei == locked_wei + payable_wei"
+        },
+        "on_chain_balance_wei": "20000000000000000000",
+        "undelivered_wei": "0",
+        "totals": {
+          "deposited_wei": "20000000000000000000",
+          "deposited_gen": "20.00",
+          "released_to_beneficiaries_wei": "0",
+          "released_to_beneficiaries_gen": "0.00",
+          "finder_fees_wei": "0",
+          "finder_fees_gen": "0.00",
+          "claimed_wei": "0",
+          "claimed_gen": "0.00"
+        },
+        "protocol_revenue_wei": "0",
+        "protocol_revenue_note": "there is none, and there is no owner withdraw method; the finder fee is paid out of the deposit to the caller"
+      }
+    },
+    {
+      "step": "heartbeat",
+      "will_id": 1,
+      "before": 1789751714,
+      "after": 1789751748,
+      "heartbeat_count": 1,
+      "tx": "0x4e3b9d3609ea1c435afc2720ba8efbb9b9edfab0819ce471b829dfd6dec03d55"
+    },
+    {
+      "step": "premature_claim",
+      "will_id": 1,
+      "status": "REJECTED",
+      "reason": "will #1 is not overdue; it becomes claimable in 5183989s",
+      "reverted": false,
+      "tx": "0x11d762740d4e7c12c1e5388cdcf36c977136b820561ace7b5e14319fa94e65d3"
+    },
+    {
+      "step": "demo_wills_created",
+      "will_1": "OK",
+      "will_2": "OK",
+      "tx_1": "0x7a0b9c5f7925924223bc89edb6bde88f999f136c88ddccd188cb368eb5e6fe67",
+      "tx_2": "0xf1b37c186bbea2ed4eca67f3bfdb10148b3c3f08c8a3ba9f25b4ba6bf6291bde"
+    },
+    {
+      "step": "claimable",
+      "count": 2,
+      "wills": [
+        {
+          "will_id": 1,
+          "owner": "0x73700819747517EAD7aceBf4DE8211FE0E047Ebd",
+          "beneficiary": "0xDbdFc00D959b596497629a7bEa89bec96B5De420",
+          "chain": "ethereum",
+          "status": "ACTIVE",
+          "deposit_wei": "8000000000000000000",
+          "deposit_gen": "8.00",
+          "check_in_interval_units": 60,
+          "last_heartbeat": 1789751770,
+          "claimable_at": 1789751890,
+          "seconds_until_claimable": 0,
+          "is_claimable": true,
+          "claim_in_flight": false,
+          "activity_status": "",
+          "finder_fee_wei": "400000000000000000",
+          "finder_fee_gen": "0.40",
+          "overdue_by_s": 43
+        },
+        {
+          "will_id": 2,
+          "owner": "0x150d820F56f67ee2Bc66ED784d21D3E2B3a08FDb",
+          "beneficiary": "0xE97A9C9053EdAb3EB900d09db36e490bED65769d",
+          "chain": "ethereum",
+          "status": "ACTIVE",
+          "deposit_wei": "4000000000000000000",
+          "deposit_gen": "4.00",
+          "check_in_interval_units": 60,
+          "last_heartbeat": 1789751779,
+          "claimable_at": 1789751899,
+          "seconds_until_claimable": 0,
+          "is_claimable": true,
+          "claim_in_flight": false,
+          "activity_status": "",
+          "finder_fee_wei": "200000000000000000",
+          "finder_fee_gen": "0.20",
+          "overdue_by_s": 34
+        }
+      ]
+    },
+    {
+      "step": "heartbeat_saves",
+      "will_id": 2,
+      "claim_status": "REJECTED",
+      "reason": "will #2 is not overdue; it becomes claimable in 113s",
+      "will_status": "ACTIVE",
+      "deposit": "4.00"
+    },
+    {
+      "step": "claim_attempts",
+      "attempts": [
+        {
+          "attempt": 1,
+          "outcome": "INACTIVE",
+          "seconds": 12.537,
+          "tx": "0x1a22d98b0a6d0d040e1af8fbfe3ecf7513d6f2eeed1147c4802b3eba9223f318",
+          "src_ok": true,
+          "content_hash": "59230c3c62082da2"
+        }
+      ]
+    },
+    {
+      "step": "consensus_round",
+      "will_id": 1,
+      "outcome": "INACTIVE",
+      "seconds": 12.537,
+      "tx": "0x1a22d98b0a6d0d040e1af8fbfe3ecf7513d6f2eeed1147c4802b3eba9223f318",
+      "evidence": {
+        "claim_attempts": 1,
+        "last_claim_at": 1789751954,
+        "reason": "No sign of life: the ethereum explorer shows no transaction signed by this wallet since the owner's last heartbeat. The newest signature is over six months old, or absent entirely, and no signature was found at all in the last 10 transactions examined. Inbound transfers were ignored: only a signature proves the key holder is present.",
+        "activity_status": "INACTIVE",
+        "age_bucket": 7,
+        "age_meaning": "over six months old, or absent entirely",
+        "count_bucket": 0,
+        "count_meaning": "no signature was found at all",
+        "src_ok": true,
+        "content_hash": "59230c3c62082da2",
+        "anchor_ts": 1789751770,
+        "checked_at": 1789751954,
+        "window": 10,
+        "chain": "ethereum"
+      },
+      "reason": "No sign of life: the ethereum explorer shows no transaction signed by this wallet since the owner's last heartbeat. The newest signature is over six months old, or absent entirely, and no signature was found at all in the last 10 transactions examined. Inbound transfers were ignored: only a signature proves the key holder is present.",
+      "settlement": {
+        "executed_at": 1789751954,
+        "finder": "0xCC84Ac0efF95D4409Fbf0A8f0f1C60E54AC1e41d",
+        "finder_fee_bps": 500,
+        "paid_beneficiary_wei": "7600000000000000000",
+        "paid_finder_wei": "400000000000000000",
+        "refunded_wei": "0"
+      }
+    },
+    {
+      "step": "verify_claim",
+      "will_id": 1,
+      "verified": true,
+      "checks": [
+        {
+          "check": "content_hash re-derives from the stored vector",
+          "ok": true,
+          "stored": "59230c3c62082da2",
+          "recomputed": "59230c3c62082da2"
+        },
+        {
+          "check": "the stored reasoning recomposes from the stored vector",
+          "ok": true
+        },
+        {
+          "check": "the stored vector is internally coherent",
+          "ok": true
+        },
+        {
+          "check": "the split re-derives and conserves exactly",
+          "ok": true,
+          "deposit_wei": "8000000000000000000",
+          "to_beneficiary_wei": "7600000000000000000",
+          "to_finder_wei": "400000000000000000"
+        },
+        {
+          "check": "a release was authorised by an INACTIVE reading from a source that answered",
+          "ok": true
+        }
+      ],
+      "canonical_projection": "v1.0.0|will=1|chain=ethereum|wallet=0x73700819747517ead7acebf4de8211fe0e047ebd|anchor=1789751770|now=1789751954|window=10|status=INACTIVE|age=7|count=0|src=1"
+    },
+    {
+      "step": "payouts",
+      "released": true,
+      "heir_tx": "0xde739709dc59d2e318f16ab083ece49193d572171acc241652cc025385063967",
+      "finder_tx": "0x3f421d9c8dedb7e51d4a5759708885367a87cc59e13c4d81c9e9fee68a43b90d",
+      "heir_pending": 1,
+      "finder_pending": 1,
+      "balances_moved": false,
+      "stats": {
+        "total_wills": 2,
+        "active": 1,
+        "executed": 1,
+        "cancelled": 0,
+        "claims_attempted": 1,
+        "verdicts": {
+          "alive": 0,
+          "inactive": 1,
+          "inconclusive": 0
+        },
+        "rejected_calls": 1,
+        "ledger": {
+          "balance_wei": "4000000000000000000",
+          "balance_gen": "4.00",
+          "locked_wei": "4000000000000000000",
+          "locked_gen": "4.00",
+          "payable_wei": "0",
+          "payable_gen": "0.00",
+          "identity_holds": true,
+          "identity": "balance_wei == locked_wei + payable_wei"
+        },
+        "on_chain_balance_wei": "12000000000000000000",
+        "undelivered_wei": "8000000000000000000",
+        "totals": {
+          "deposited_wei": "12000000000000000000",
+          "deposited_gen": "12.00",
+          "released_to_beneficiaries_wei": "7600000000000000000",
+          "released_to_beneficiaries_gen": "7.60",
+          "finder_fees_wei": "400000000000000000",
+          "finder_fees_gen": "0.40",
+          "claimed_wei": "8000000000000000000",
+          "claimed_gen": "8.00"
+        },
+        "protocol_revenue_wei": "0",
+        "protocol_revenue_note": "there is none, and there is no owner withdraw method; the finder fee is paid out of the deposit to the caller"
+      }
+    },
+    {
+      "step": "frozen",
+      "released": true,
+      "second_claim": "REJECTED",
+      "cancel": "REJECTED"
+    },
+    {
+      "step": "cancel",
+      "status": "OK",
+      "stats": {
+        "total_wills": 2,
+        "active": 0,
+        "executed": 1,
+        "cancelled": 1,
+        "claims_attempted": 1,
+        "verdicts": {
+          "alive": 0,
+          "inactive": 1,
+          "inconclusive": 0
+        },
+        "rejected_calls": 3,
+        "ledger": {
+          "balance_wei": "4000000000000000000",
+          "balance_gen": "4.00",
+          "locked_wei": "0",
+          "locked_gen": "0.00",
+          "payable_wei": "4000000000000000000",
+          "payable_gen": "4.00",
+          "identity_holds": true,
+          "identity": "balance_wei == locked_wei + payable_wei"
+        },
+        "on_chain_balance_wei": "12000000000000000000",
+        "undelivered_wei": "8000000000000000000",
+        "totals": {
+          "deposited_wei": "12000000000000000000",
+          "deposited_gen": "12.00",
+          "released_to_beneficiaries_wei": "7600000000000000000",
+          "released_to_beneficiaries_gen": "7.60",
+          "finder_fees_wei": "400000000000000000",
+          "finder_fees_gen": "0.40",
+          "claimed_wei": "8000000000000000000",
+          "claimed_gen": "8.00"
+        },
+        "protocol_revenue_wei": "0",
+        "protocol_revenue_note": "there is none, and there is no owner withdraw method; the finder fee is paid out of the deposit to the caller"
+      }
+    },
+    {
+      "step": "done",
+      "failures": 0
+    }
+  ],
+  "finished_at": "2026-09-18T17:20:56.057Z",
+  "failures": 0,
+  "canonical_stats": {
+    "total_wills": 3,
+    "active": 3,
+    "executed": 0,
+    "cancelled": 0,
+    "claims_attempted": 0,
+    "verdicts": {
+      "alive": 0,
+      "inactive": 0,
+      "inconclusive": 0
+    },
+    "rejected_calls": 1,
+    "ledger": {
+      "balance_wei": "20000000000000000000",
+      "balance_gen": "20.00",
+      "locked_wei": "20000000000000000000",
+      "locked_gen": "20.00",
+      "payable_wei": "0",
+      "payable_gen": "0.00",
+      "identity_holds": true,
+      "identity": "balance_wei == locked_wei + payable_wei"
+    },
+    "on_chain_balance_wei": "20000000000000000000",
+    "undelivered_wei": "0",
+    "totals": {
+      "deposited_wei": "20000000000000000000",
+      "deposited_gen": "20.00",
+      "released_to_beneficiaries_wei": "0",
+      "released_to_beneficiaries_gen": "0.00",
+      "finder_fees_wei": "0",
+      "finder_fees_gen": "0.00",
+      "claimed_wei": "0",
+      "claimed_gen": "0.00"
+    },
+    "protocol_revenue_wei": "0",
+    "protocol_revenue_note": "there is none, and there is no owner withdraw method; the finder fee is paid out of the deposit to the caller"
+  },
+  "demo_stats": {
+    "total_wills": 2,
+    "active": 0,
+    "executed": 1,
+    "cancelled": 1,
+    "claims_attempted": 1,
+    "verdicts": {
+      "alive": 0,
+      "inactive": 1,
+      "inconclusive": 0
+    },
+    "rejected_calls": 3,
+    "ledger": {
+      "balance_wei": "4000000000000000000",
+      "balance_gen": "4.00",
+      "locked_wei": "0",
+      "locked_gen": "0.00",
+      "payable_wei": "4000000000000000000",
+      "payable_gen": "4.00",
+      "identity_holds": true,
+      "identity": "balance_wei == locked_wei + payable_wei"
+    },
+    "on_chain_balance_wei": "12000000000000000000",
+    "undelivered_wei": "8000000000000000000",
+    "totals": {
+      "deposited_wei": "12000000000000000000",
+      "deposited_gen": "12.00",
+      "released_to_beneficiaries_wei": "7600000000000000000",
+      "released_to_beneficiaries_gen": "7.60",
+      "finder_fees_wei": "400000000000000000",
+      "finder_fees_gen": "0.40",
+      "claimed_wei": "8000000000000000000",
+      "claimed_gen": "8.00"
+    },
+    "protocol_revenue_wei": "0",
+    "protocol_revenue_note": "there is none, and there is no owner withdraw method; the finder fee is paid out of the deposit to the caller"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "willexecutor-tests",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Integration + deployment scripts for WillExecutor on GenLayer Studio Dev",
+  "dependencies": {
+    "genlayer-js": "2.0.0-rc.1"
+  }
+}

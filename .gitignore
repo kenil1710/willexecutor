@@ -1,0 +1,17 @@
+node_modules/
+.next/
+.env.local
+.env
+*.log
+.DS_Store
+__pycache__/
+*.pyc
+*.agent.md
+.agent/
+HANDOVER.md
+.accounts.json
+.deployed.json
+*.tsbuildinfo
+
+# The seed log is EVIDENCE and belongs in the repo, unlike build noise.
+!docs/seed-run.log
