@@ -275,6 +275,15 @@ for n in ast.walk(t):
 sys.exit(1)
 PY
 
+check "_url_v2 takes only (host, wallet)" python3 - <<'PY'
+import ast, sys
+t = ast.parse(open("contracts/WillExecutor.py").read())
+for n in ast.walk(t):
+    if isinstance(n, ast.FunctionDef) and n.name == "_url_v2":
+        sys.exit(0 if {a.arg for a in n.args.args} == {"host", "wallet"} else 1)
+sys.exit(1)
+PY
+
 check "the only https:// literal in the file is the scheme itself" python3 - <<'PY'
 import ast, sys
 t = ast.parse(open("contracts/WillExecutor.py").read())
@@ -297,7 +306,192 @@ sys.exit(0)
 PY
 
 # ---------------------------------------------------------------------------
-sec "9. Rule 1 — consensus binds every stored value"
+sec "9. Rule 9 — outbound-only evidence, and coverage before release"
+# THE REJECTION THIS SECTION EXISTS FOR. The probe used to fetch the newest ten
+# transactions of an account and filter them by signer; ten inbound transfers
+# arriving after the owner's last signature pushed it off the page, the filter
+# found nothing, and a living owner's estate was released. Every check below is
+# one half of the fix, wired so that removing it fails here as well as in the
+# suite.
+check "the primary probe asks the explorer for outbound history only" python3 - <<'PY'
+import sys
+sys.path.insert(0, "test")
+import test_logic as T
+url = T.C._url_v2("eth.blockscout.com", "0x" + "b" * 40)
+if "filter=from" not in url or "/api/v2/addresses/" not in url:
+    print("primary URL is not outbound-filtered:", url)
+    sys.exit(1)
+sys.exit(0)
+PY
+
+check "the probe never TRUSTS the filter — coverage is proved from the page" python3 - <<'PY'
+import ast, sys
+t = ast.parse(open("contracts/WillExecutor.py").read())
+fn = next(n for n in ast.walk(t)
+          if isinstance(n, ast.FunctionDef) and n.name == "_probe")
+# There must be exactly ONE way for a non-ALIVE verdict to become covered, and
+# it must be `_covers` reading the page. A second path — "every item came back
+# outbound, so trust it" — is how an assumption about the endpoint gets back
+# into the money path, which is the shape of the original bug.
+covers = [n for n in ast.walk(fn) if isinstance(n, ast.Call)
+          and ast.unparse(n.func) == "_covers"]
+if len(covers) != 1:
+    print("expected exactly one _covers call, found", len(covers))
+    sys.exit(1)
+assigns = [n for n in ast.walk(fn) if isinstance(n, ast.Assign)
+           and any(getattr(t_, "id", "") == "covered" for t_ in n.targets)]
+# One `covered = True` for the ALIVE case, one `covered = _covers(...)`.
+if len(assigns) != 2:
+    print("expected exactly two assignments to `covered`, found", len(assigns))
+    sys.exit(1)
+sys.exit(0)
+PY
+
+check "TX_WINDOW equals the v2 page size (a larger one re-opens the bug)" python3 - <<'PY'
+import sys
+sys.path.insert(0, "test")
+import test_logic as T
+# v2 returns a FIXED page of 50 and takes no size parameter. If TX_WINDOW were
+# larger, a full 50-item page would satisfy `len(items) < requested` and be
+# read as a COMPLETE history — handing the inbound flood its old result back
+# through the coverage check. Measured against the live endpoint 2026-09-21.
+sys.exit(0 if T.C.TX_WINDOW == 50 else 1)
+PY
+
+check "an INACTIVE verdict is incoherent without proven coverage" python3 - <<'PY'
+import sys
+sys.path.insert(0, "test")
+import test_logic as T
+C = T.C
+for status in (C.A_INACTIVE, C.A_ALIVE):
+    v = {"activity_status": status, "age_bucket": 3, "count_bucket": 2,
+         "src_ok": True, "cov_ok": False}
+    if C._coherent(C._seal(1, "ethereum", "0x" + "b" * 40, 0, 0, 50, v)):
+        print("a verdict passed _coherent with cov_ok false:", status)
+        sys.exit(1)
+sys.exit(0)
+PY
+
+check "cov_ok is on the compared axis, not merely stored" python3 - <<'PY'
+import sys
+sys.path.insert(0, "test")
+import test_logic as T
+C = T.C
+base = {"activity_status": C.A_INACTIVE, "age_bucket": 7, "count_bucket": 0,
+        "src_ok": True, "cov_ok": True}
+other = dict(base); other["cov_ok"] = False
+mine = C._seal(1, "ethereum", "0x" + "b" * 40, 0, 0, 50, base)
+theirs = C._seal(1, "ethereum", "0x" + "b" * 40, 0, 0, 50, other)
+if C._agrees(theirs, mine):
+    print("_agrees accepted a differing cov_ok")
+    sys.exit(1)
+if "cov=" not in C._canon(1, "ethereum", "0x" + "b" * 40, 0, 0, 50, base):
+    print("the canonical projection does not commit to coverage")
+    sys.exit(1)
+sys.exit(0)
+PY
+
+check "the inbound flood cannot produce INACTIVE on any page shape" python3 - <<'PY'
+import sys
+sys.path.insert(0, "test")
+import test_logic as T
+C, WEB = T.C, T.WEB
+ALICE, STRANGER = T.ALICE, T.STRANGER
+NOW, DAY = T.NOW, T.DAY
+anchor = NOW - 10 * DAY
+# The owner signs once after the anchor, then is buried under inbound traffic.
+# Whatever the explorer does with the filter, and however deep the flood, the
+# one verdict that must never come back is INACTIVE.
+for honoured in (True, False):
+    for n in (5, 10, 50, 120):
+        WEB.reset()
+        items = [T.tx(NOW - i * 60, STRANGER, to=ALICE) for i in range(n)]
+        items.append(T.tx(anchor + DAY, ALICE))
+        items.sort(key=lambda i: -int(i["timeStamp"]))
+        (T.serve_txs if honoured else T.serve_unfiltered)(items)
+        got = C._probe(1, "ethereum", str(ALICE), anchor, NOW,
+                       C.TX_WINDOW)["activity_status"]
+        if got == C.A_INACTIVE:
+            print("released a living owner:", honoured, n, got)
+            sys.exit(1)
+sys.exit(0)
+PY
+
+check "no pagination loop (a round would rate-limit itself into silence)" python3 - <<'PY'
+import ast, sys
+t = ast.parse(open("contracts/WillExecutor.py").read())
+fn = next(n for n in ast.walk(t)
+          if isinstance(n, ast.FunctionDef) and n.name == "_probe")
+# `eth.blockscout.com` answers 429 at roughly the third rapid request from one
+# address, and a consensus round fires one probe per validator at once. The
+# fetches must be a fixed, small number of straight-line calls — never a loop.
+fetches = [c for c in ast.walk(fn) if isinstance(c, ast.Call)
+           and ast.unparse(c.func).endswith("_http")]
+if len(fetches) != 2:
+    print("expected exactly two _http calls, found", len(fetches))
+    sys.exit(1)
+for f in fetches:
+    for loop in ast.walk(fn):
+        if isinstance(loop, (ast.For, ast.While)) and f in ast.walk(loop):
+            print("a fetch sits inside a loop")
+            sys.exit(1)
+sys.exit(0)
+PY
+
+check "at most two fetches per probe, measured rather than parsed" python3 - <<'PY'
+import sys
+sys.path.insert(0, "test")
+import test_logic as T
+C, WEB = T.C, T.WEB
+for setup in (T.serve_empty, T.serve_refused, T.serve_down,
+              lambda: T.serve_txs([T.tx(T.NOW - T.HOUR, T.ALICE)])):
+    WEB.reset()
+    setup()
+    C._probe(1, "ethereum", str(T.ALICE), T.NOW - T.DAY, T.NOW, C.TX_WINDOW)
+    if len(WEB.log) > 2:
+        print("probe made", len(WEB.log), "fetches")
+        sys.exit(1)
+sys.exit(0)
+PY
+
+check "both transaction spellings are read (v2 nests the signer)" python3 - <<'PY'
+import sys
+sys.path.insert(0, "test")
+import test_logic as T
+C = T.C
+legacy = T.tx(T.NOW, T.ALICE)
+v2 = T.v2_tx(T.NOW, T.ALICE)
+me = str(T.ALICE).lower()
+# Reading only the flat spelling would make every v2 item look unsigned by
+# anybody — zero signatures, which reads as INACTIVE.
+if C._tx_from(legacy) != me or C._tx_from(v2) != me:
+    print("a signer spelling is not read")
+    sys.exit(1)
+if C._tx_time(legacy) != T.NOW or C._tx_time(v2) != T.NOW:
+    print("a timestamp spelling is not read")
+    sys.exit(1)
+sys.exit(0)
+PY
+
+check "a v2 error body is never mistaken for an empty wallet" python3 - <<'PY'
+import sys
+sys.path.insert(0, "test")
+import test_logic as T
+C = T.C
+# The v2 spelling of the `result: null` trap. HTTP 422 with an `errors` key and
+# no `items` key at all — measured 2026-09-21. Reading it as "no transactions"
+# would pay out an inheritance on a typo.
+if C._parse_v2(T.V2_REFUSED_BODY)[0]:
+    print("an error body parsed as an answer")
+    sys.exit(1)
+if not C._parse_v2(T.V2_EMPTY_BODY)[0]:
+    print("a genuinely empty wallet was read as unreadable")
+    sys.exit(1)
+sys.exit(0)
+PY
+
+# ---------------------------------------------------------------------------
+sec "10. Rule 1 — consensus binds every stored value"
 check "exactly one run_nondet call (one round, one axis)" python3 - <<'PY'
 import ast, sys
 t = ast.parse(open("contracts/WillExecutor.py").read())
@@ -345,7 +539,7 @@ sys.exit(1)
 PY
 
 # ---------------------------------------------------------------------------
-sec "10. The offline suite"
+sec "11. The offline suite"
 if python3 test/test_logic.py >/tmp/we_tests.log 2>&1; then
   N=$(grep -oE 'Ran [0-9]+ tests' /tmp/we_tests.log | grep -oE '[0-9]+')
   if [ "${N:-0}" -ge 200 ]; then ok "$N offline tests pass (the brief asks for 200+)"
@@ -371,7 +565,7 @@ sys.exit(1 if p else 0)
 PY
 
 # ---------------------------------------------------------------------------
-sec "11. The brief's surface"
+sec "12. The brief's surface"
 check "every method the brief names exists" python3 - <<'PY'
 import ast, sys
 REQUIRED = ["create_will", "heartbeat", "top_up", "claim_inactive",
@@ -414,13 +608,13 @@ sys.exit(0 if T.C.MIN_INTERVAL_S == 7 * 86400 and T.C.MAX_INTERVAL_S == 365 * 86
 PY
 
 # ---------------------------------------------------------------------------
-sec "12. Contract size"
+sec "13. Contract size"
 BYTES=$(wc -c < "$WE" | tr -d ' ')
 if [ "$BYTES" -lt 200000 ]; then ok "contract is ${BYTES} bytes (Studio Dev has taken 121 KB; measured)"
 else bad "contract is ${BYTES} bytes — past anything measured"; fi
 
 # ---------------------------------------------------------------------------
-sec "13. The docs describe the contract that is actually deployed"
+sec "14. The docs describe the contract that is actually deployed"
 # A README naming a dead address documents a contract nobody can open, and it
 # is the single easiest thing to get wrong after a redeploy.
 check "README and EVIDENCE.md carry the live addresses from deployments.json" python3 - <<'PY'
@@ -465,7 +659,7 @@ sys.exit(0)
 PY
 
 # ---------------------------------------------------------------------------
-sec "14. The live deploy"
+sec "15. The live deploy"
 if [ "$WITH_CHAIN" -eq 0 ]; then
   skp "on-chain assertions" "pass --chain to run them"
 elif [ ! -f deployments.json ]; then

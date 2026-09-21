@@ -32,8 +32,9 @@ import typing
 #      field the validators did not compare is a field the leader can forge,
 #      and a forged INACTIVE verdict empties a living person's estate. So the
 #      compared axis is the whole FEATURE VECTOR: activity status, age bucket,
-#      count bucket, source-availability flag and the content hash over all of
-#      them. The corollary is enforced in the other direction too: this
+#      count bucket, source-availability flag, evidence-coverage flag and the
+#      content hash over all of them. The corollary is enforced in the other
+#      direction too: this
 #      contract STORES NOTHING IT DID NOT COMPARE. There is deliberately no
 #      raw-body digest in storage - see rule 9 and NOTES.md §2.
 #
@@ -88,24 +89,36 @@ import typing
 #      non-200, an unparseable body, a `result` that is not a list - lands
 #      here. The failure direction is always "the money stays where it is".
 #
-#   9. ONLY A SIGNATURE PROVES LIFE. Activity means transactions the wallet
+#   9. ONLY A SIGNATURE PROVES LIFE, AND ONLY EVIDENCE THAT REACHES THE
+#      QUESTION PROVES ITS ABSENCE. Activity means transactions the wallet
 #      SENT, never ones it received. A dead wallet still receives - airdrops,
 #      dust, refunds - and if an inbound transfer counted as a heartbeat then
 #      any stranger could keep any will locked for ever for the price of one
-#      wei. Only the key holder can sign. `_probe` filters on `from` and the
-#      offline suite proves a wallet buried in inbound traffic still reads
-#      INACTIVE. The brief did not ask for this; the contract would have been
-#      griefable without it.
+#      wei. Only the key holder can sign.
+#
+#      THE SECOND HALF OF THIS RULE IS WRITTEN IN BLOOD. Filtering a page by
+#      signer is not the same as fetching a page of signatures. This contract
+#      once asked for the newest ten transactions of an account and filtered
+#      them; ten inbound transfers arriving after the owner's last signature
+#      pushed that signature off the page, the filter found nothing, and the
+#      probe read a living owner as gone. So the probe now asks Blockscout for
+#      OUTBOUND HISTORY ONLY - and, separately, refuses to call anything
+#      INACTIVE unless the page it read demonstrably reaches back past the
+#      anchor. The first keeps the contract useful; the SECOND is what makes a
+#      wrong release impossible, and it holds whether or not the explorer
+#      honoured the filter. See `_covers`, `cov_ok`, and NOTES.md §4.
 #
 #  10. THE EXPLORER URL IS DERIVED FROM AN ALLOWLIST, NEVER SUPPLIED BY A
 #      CALLER. A caller who could name the URL could point every validator at
 #      a server they control and manufacture any verdict they liked. There is
 #      no code path in this file that accepts a host, a URL or a path from
-#      calldata. `chain` selects a key in `CHAIN_HOSTS` and nothing else.
+#      calldata. `chain` selects a key in `CHAIN_HOSTS` and nothing else, and
+#      both URL builders - `_url_v2` and `_url` - take only that host, the
+#      wallet already in storage, and literals from this file.
 #
 # str.replace() is rejected by the runner; slice around find() instead.
 
-RUBRIC_VERSION = "1.0.0"
+RUBRIC_VERSION = "1.1.0"
 
 # --- the explorer allowlist (rule 10).
 #
@@ -138,16 +151,28 @@ DEFAULT_CHAIN = "ethereum"
 
 # How many transactions a probe asks for.
 #
-# The v2 endpoint `/api/v2/addresses/{a}/transactions` returns a fixed page of
-# 50 and measured 530 KB on a busy wallet. The legacy endpoint takes an
-# `offset` and returned the same facts in 4.5 KB. Every validator pays this
-# cost on every probe, so the smaller one is not a micro-optimisation: it is
-# the difference between a round that settles and a round that times out.
+# FIFTY, WHICH IS WHAT v2 RETURNS. The primary probe is
+# `/api/v2/addresses/{a}/transactions?filter=from`, whose page size is fixed at
+# 50 server-side and takes no `offset`, so this is not a number this contract
+# chooses so much as one it records: it is the bound `_covers` measures a
+# short page against, and the count `_reason` reports as examined. The legacy
+# fallback is asked for the same 50 so that one window describes both sources
+# and `_canon` commits to a figure that means the same thing either way.
 #
-# Ten is enough to answer the only question asked - "did this wallet sign
-# anything after the anchor" - because the list is sorted newest-first, so if
-# the tenth-newest is already older than the anchor, the eleventh cannot help.
-TX_WINDOW = 10
+# TEN WAS THE OLD VALUE AND TEN WAS THE BUG. Ten is enough to answer "did this
+# wallet sign anything after the anchor" ONLY on a page that is already
+# outbound-only; on a mixed page, ten inbound transfers are enough to hide the
+# owner's own last signature completely. The fix is not a bigger number - 50
+# inbound transfers hide it just as well - it is asking the right endpoint and
+# refusing to answer when the page does not reach the anchor. See `_covers`.
+#
+# The cost is real and was measured: v2 returned 642 KB on `vitalik.eth`,
+# against 7 KB for the legacy page, and every validator pays it on every probe.
+# An ordinary estate wallet is nothing like that - a freshly generated key
+# returns 36 bytes - and where the two disagree, correctness wins: a round that
+# times out can be retried by anyone, and an estate released from a living
+# owner cannot be recalled by anyone.
+TX_WINDOW = 50
 
 # --- statuses. ACTIVE is live; the other two are terminal and freeze the will
 # for ever (rule 5).
@@ -423,16 +448,52 @@ def _plural(n: int, one: str, many: str) -> str:
 
 
 def _url(host: str, wallet: str, window: int) -> str:
-    """The probe URL. Built ONLY from the allowlist host and the wallet address
-    that is already in storage (rule 10).
+    """The FALLBACK probe URL: the legacy `txlist` page, newest first.
 
-    The legacy `txlist` endpoint rather than `/api/v2/...` for two measured
-    reasons. It accepts `offset`, so the body is 4.5 KB instead of 530 KB - a
-    cost every validator pays on every probe. And its `timeStamp` is a Unix
-    integer rather than an ISO string, so the one field the verdict turns on
-    needs no date parsing and carries no timezone to disagree about."""
+    Built ONLY from the allowlist host and the wallet address that is already
+    in storage (rule 10).
+
+    It is cheap - 4.5 KB against v2's 600 KB, with `timeStamp` as a Unix
+    integer rather than an ISO string - and it is the SECOND thing tried, not
+    the first, because it is MIXED: the page is the newest N transactions of
+    the account, inbound and outbound together. That is exactly the endpoint
+    whose newest-ten page this contract used to read as the whole truth, and
+    exactly the bug that got it rejected. It is kept because when v2 is
+    unreachable it can still settle the ordinary estate case honestly - a
+    wallet with little or no history returns a SHORT page, and a short page is
+    the whole history - and because `_covers` refuses to let it answer in any
+    case where it cannot.
+
+    MEASURED 2026-09-21: this endpoint accepts and then SILENTLY IGNORES both
+    `filterby=from` and `starttimestamp`. Byte-identical responses, HTTP 200,
+    no warning. A filter that is silently dropped is worse than no filter at
+    all, because the code reads as though the narrowing happened - so neither
+    is sent here, and nothing downstream assumes either worked."""
     return ("https://" + host + "/api?module=account&action=txlist&address="
             + wallet + "&sort=desc&page=1&offset=" + str(int(window)))
+
+
+def _url_v2(host: str, wallet: str) -> str:
+    """The PRIMARY probe URL: the transactions this wallet SENT, newest first.
+
+    Built ONLY from the allowlist host and the wallet address that is already
+    in storage (rule 10) - the `filter` value is a literal in this file and
+    nothing a caller supplies reaches the query string.
+
+    `filter=from` is server-side and AUTHORITATIVE, which is the property the
+    whole verdict now rests on. The question this contract asks is "did this
+    wallet sign anything after the anchor", and the only page that answers it
+    with a bounded fetch is a page of outbound transactions: the newest one is
+    then the newest signature that exists, and no amount of inbound traffic can
+    push it out of view.
+
+    MEASURED 2026-09-21 against all six allowlisted hosts: HTTP 200 with an
+    `items` list on every one, and on every host that returned items, every
+    item was outbound. It is still not TRUSTED - see `_probe`, which checks the
+    signer of every item it was handed and falls back to proving coverage the
+    hard way if even one of them is not the wallet."""
+    return ("https://" + host + "/api/v2/addresses/" + wallet
+            + "/transactions?filter=from")
 
 
 def _http(url: str) -> tuple:
@@ -464,7 +525,7 @@ def _http(url: str) -> tuple:
 
 
 def _parse(body: str) -> tuple:
-    """(readable, items) from a txlist response. Never raises.
+    """(readable, items) from a LEGACY txlist response. Never raises.
 
     THE MOST IMPORTANT FOUR LINES IN THIS FILE, and the reason they are written
     out rather than folded into a truthiness check:
@@ -501,32 +562,136 @@ def _parse(body: str) -> tuple:
     return (True, items)
 
 
+def _parse_v2(body: str) -> tuple:
+    """(readable, items) from a V2 response. Never raises.
+
+    v2 draws the refusal/answer line in a different place from the legacy
+    endpoint, and MEASURED 2026-09-21 it draws it more clearly:
+
+        HTTP 200 {"items":[ ... ],"next_page_params":{...}}
+            outbound transactions, newest first
+
+        HTTP 200 {"items":[],"next_page_params":null}
+            this wallet has SENT nothing - a real answer, and the one that
+            releases money
+
+        HTTP 422 {"errors":[{"title":"Invalid value", ...}]}
+            the explorer REFUSED the query; there is no `items` key at all
+
+    So the same discipline as `_parse`, against a different key: a LIST under
+    `items` is an answer and anything else is a refusal. `_probe` gates on the
+    status code before this runs, so the 422 body never reaches here - but the
+    key check is what the verdict actually rests on, and it is the one that
+    would still be right if a future build started answering 200 with an error
+    body. An `items` key that is missing, null or a string is not a list, and
+    not a list is INCONCLUSIVE."""
+    if not body:
+        return (False, [])
+    try:
+        doc = json.loads(body)
+    except Exception:
+        return (False, [])
+    if not isinstance(doc, dict):
+        return (False, [])
+    items = doc.get("items")
+    if not isinstance(items, list):
+        return (False, [])
+    return (True, items)
+
+
 def _tx_time(item: typing.Any) -> int:
-    """The Unix second a transaction was mined, or 0."""
+    """The Unix second a transaction was mined, or 0.
+
+    BOTH SPELLINGS, because the two endpoints disagree about them: legacy
+    stamps `timeStamp` as a string of Unix seconds, v2 stamps `timestamp` as an
+    ISO-8601 instant in UTC. `_epoch_from_iso` reads that at fixed character
+    offsets, so the fractional seconds v2 appends are ignored rather than
+    parsed - there is nothing in them that a day-scale ladder could use, and a
+    field nobody reads is a field nobody can disagree about."""
     if not isinstance(item, dict):
         return 0
-    return _as_int(item.get("timeStamp"), 0)
+    legacy = _as_int(item.get("timeStamp"), 0)
+    if legacy > 0:
+        return legacy
+    return _epoch_from_iso(item.get("timestamp"))
 
 
 def _tx_from(item: typing.Any) -> str:
-    """The SIGNER of a transaction, lowercased (rule 9)."""
+    """The SIGNER of a transaction, lowercased (rule 9).
+
+    Legacy spells it as a flat hex string; v2 spells it as an object with a
+    `hash`. Reading only the flat one would make every v2 item look unsigned by
+    anybody - which counts as zero signatures, which reads as INACTIVE - so
+    handling both spellings here is a money path and not a convenience.
+
+    Anything that is neither is "", which matches no wallet and is therefore
+    not counted as a signature. That is the safe direction: an item whose signer
+    cannot be read can never make a wallet look MORE alive than it is, and it
+    cannot shorten the reach `_covers` measures either, because that is computed
+    over every item on the page regardless of who signed it."""
     if not isinstance(item, dict):
         return ""
-    return _lower(item.get("from") or "")
+    who = item.get("from")
+    if isinstance(who, dict):
+        who = who.get("hash")
+    if not isinstance(who, str):
+        return ""
+    return _lower(who)
+
+
+def _covers(count: int, oldest: int, anchor_ts: int, requested: int) -> bool:
+    """Does this page of history reach back far enough to PROVE a negative?
+
+    THE FIX FOR THE BUG THAT GOT THIS CONTRACT REJECTED, given its own name
+    because the bug had no name and that is why it survived review twice.
+
+    The old probe fetched the newest ten transactions of an account, filtered
+    them by signer, found none, and released an estate. Nothing in that
+    sequence is wrong except the unstated assumption underneath it: that a page
+    with no signature ON it is a wallet with no signature AFTER the anchor.
+    That assumption holds only if the page reaches back to the anchor. An owner
+    who signs a transaction and then receives ten inbound transfers has pushed
+    their own signature off the page, and the probe reads them as gone. It
+    costs an attacker ten dust transfers to stage, and it happens by accident
+    to any wallet that receives more traffic than it sends - MEASURED
+    2026-09-21, the ten newest transactions of `vitalik.eth` are all inbound,
+    while its newest outbound transaction is a month old.
+
+    A page proves the negative in exactly two situations:
+
+      - it is SHORTER than what was asked for, so it is the entire history
+        there is and nothing is missing from it; or
+      - its OLDEST entry is at or before the anchor, so the page spans the
+        boundary and any transaction after the anchor would have to be on it.
+
+    In every other case the honest answer is that this evidence does not reach
+    the question, and `_probe` returns INCONCLUSIVE. INCONCLUSIVE changes
+    nothing and can be retried by anyone; INACTIVE pays out an estate. Those
+    are not symmetric, so the burden of proof is not symmetric either."""
+    if int(count) < int(requested):
+        return True
+    return oldest > 0 and oldest <= int(anchor_ts)
 
 
 def _vector(status: str, age_bucket: int, count_bucket: int,
-            src_ok: bool) -> dict:
+            src_ok: bool, cov_ok: bool) -> dict:
     """The compared axis, in one shape, built in one place.
 
-    Five fields, and `content_hash` is added by `_seal` once the will's
-    identity is known. Nothing else the probe learns survives into storage -
-    see rule 1 and NOTES.md §2."""
+    Six fields, and `content_hash` is added by `_seal` once the will's identity
+    is known. Nothing else the probe learns survives into storage - see rule 1
+    and NOTES.md §2.
+
+    `cov_ok` joined `src_ok` on the axis for the same reason `src_ok` was there
+    first. `src_ok` makes the validators agree that the source ANSWERED;
+    `cov_ok` makes them agree that what it answered with REACHED THE QUESTION.
+    A leader that could assert either one alone could release an estate on
+    evidence no validator ever checked the extent of."""
     return {
         "activity_status": str(status),
         "age_bucket": _clamp(_as_int(age_bucket, TOP_BUCKET), 0, TOP_BUCKET),
         "count_bucket": _clamp(_as_int(count_bucket, 0), 0, TOP_BUCKET),
         "src_ok": bool(src_ok),
+        "cov_ok": bool(cov_ok),
     }
 
 
@@ -554,6 +719,7 @@ def _canon(will_id: int, chain: str, wallet: str, anchor_ts: int,
         "age=" + str(_as_int(vector.get("age_bucket"), -1)),
         "count=" + str(_as_int(vector.get("count_bucket"), -1)),
         "src=" + ("1" if bool(vector.get("src_ok")) else "0"),
+        "cov=" + ("1" if bool(vector.get("cov_ok")) else "0"),
     ])
 
 
@@ -584,32 +750,61 @@ def _probe(will_id: int, chain: str, wallet: str, anchor_ts: int, now_ts: int,
     validator, which is exactly what no single-node chain can do. See
     NOTES.md §3 for why that is the right call and not a shortcut.
 
+    TWO SOURCES, IN ORDER, AND AT MOST TWO FETCHES. v2 filtered to outbound
+    first, because it answers the question directly. The legacy page only if
+    v2 returned nothing readable, because it is cheap and because a quiet
+    wallet's short page is a complete history. There is no pagination loop: a
+    consensus round fires one probe PER VALIDATOR simultaneously from one
+    datacentre range, and `eth.blockscout.com` starts answering 429 at roughly
+    the third rapid request from one address. A five-page walk would turn every
+    round into a rate-limit storm and every verdict into INCONCLUSIVE - so the
+    bound is two requests, and where two requests cannot prove the negative the
+    answer is INCONCLUSIVE by design rather than by exhaustion.
+
     Every failure lands on INCONCLUSIVE (rule 8)."""
     host = CHAIN_HOSTS.get(str(chain))
     if not host:
         # Unreachable through any public path - `create_will` validates the
         # chain against the same table - but a probe that cannot name its host
         # must still return a vector rather than fall off the end.
-        return _vector(A_INCONCLUSIVE, AGE_NEVER, 0, False)
+        return _vector(A_INCONCLUSIVE, AGE_NEVER, 0, False, False)
 
-    status, body = _http(_url(host, _lower(wallet), window))
-    if status != 200:
-        return _vector(A_INCONCLUSIVE, AGE_NEVER, 0, False)
+    me = _lower(wallet)
 
-    readable, items = _parse(body)
+    # FIRST: the authoritative outbound-only history.
+    status, body = _http(_url_v2(host, me))
+    readable = False
+    items = []
+    if status == 200:
+        readable, items = _parse_v2(body)
+
     if not readable:
-        return _vector(A_INCONCLUSIVE, AGE_NEVER, 0, False)
+        # SECOND, and only when the first produced no readable list at all. A
+        # v2 page that WAS readable is never second-guessed by a weaker source:
+        # asking twice for the same facts doubles the rate-limit pressure and
+        # cannot improve on an answer that already came from the right endpoint.
+        status, body = _http(_url(host, me, window))
+        if status != 200:
+            return _vector(A_INCONCLUSIVE, AGE_NEVER, 0, False, False)
+        readable, items = _parse(body)
+        if not readable:
+            return _vector(A_INCONCLUSIVE, AGE_NEVER, 0, False, False)
 
     # RULE 9. Only transactions this wallet SIGNED count. `from` is the signer;
     # an inbound transfer says something about the sender, not about whether
     # the owner is alive to press a button.
-    me = _lower(wallet)
+    #
+    # `oldest` spans EVERY item on the page, signed or not, and that is
+    # deliberate: how far back the page reaches is a fact about the page, not
+    # about who signed what on it. It is what `_covers` measures.
     signed = []
+    oldest = 0
     for item in items:
-        if _tx_from(item) == me:
-            when = _tx_time(item)
-            if when > 0:
-                signed.append(when)
+        when = _tx_time(item)
+        if _tx_from(item) == me and when > 0:
+            signed.append(when)
+        if when > 0 and (oldest == 0 or when < oldest):
+            oldest = when
 
     newest = 0
     for when in signed:
@@ -620,6 +815,32 @@ def _probe(will_id: int, chain: str, wallet: str, anchor_ts: int, now_ts: int,
     for when in signed:
         if when > anchor_ts:
             since_anchor += 1
+
+    # COVERAGE: may this page be used to prove that nothing was signed after
+    # the anchor?
+    #
+    # THE OUTBOUND FILTER IS NOT TRUSTED HERE, AND - THIS IS THE POINT - IT
+    # DOES NOT HAVE TO BE. An earlier draft of this fix took a shortcut when
+    # every item on the page turned out to be outbound, on the reasoning that
+    # the newest item must then be the newest signature. That reasoning is
+    # sound, and it is also REDUNDANT: a page of outbound transactions with
+    # nothing after the anchor has every one of its entries at or before the
+    # anchor, so `_covers` reaches the same conclusion without it. It was worse
+    # than redundant in one case - a page whose timestamps were all unreadable,
+    # where the shortcut said "covered" and `_covers` says "ask again".
+    #
+    # So there is no shortcut. Coverage is proved from the page itself, the
+    # same way whichever endpoint returned it and whether or not the filter was
+    # honoured. `filter=from` is what makes the answer USEFUL - it is why a
+    # dormant wallet buried in inbound traffic still settles instead of going
+    # INCONCLUSIVE for ever. It is not what makes the answer SAFE.
+    if since_anchor > 0:
+        # There is no negative left to prove. A signature after the anchor is
+        # positive evidence and it is sufficient on its own, so ALIVE never
+        # depends on how far back the page reaches.
+        covered = True
+    else:
+        covered = _covers(len(items), oldest, anchor_ts, window)
 
     if newest <= 0:
         age_bucket = AGE_NEVER
@@ -638,8 +859,19 @@ def _probe(will_id: int, chain: str, wallet: str, anchor_ts: int, now_ts: int,
     # question about two fixed timestamps, so it gives the same answer on every
     # validator and the same answer tomorrow. "Anything in the last N days"
     # would move under the probe every time it ran.
-    verdict = A_ALIVE if since_anchor > 0 else A_INACTIVE
-    return _vector(verdict, age_bucket, count_bucket, True)
+    if since_anchor > 0:
+        return _vector(A_ALIVE, age_bucket, count_bucket, True, True)
+
+    if not covered:
+        # The source ANSWERED - `src_ok` stays true, and that is the whole of
+        # what separates this reading from a dead host once it is in storage -
+        # but what it answered with cannot rule out a signature after the
+        # anchor. The buckets pin, because an INCONCLUSIVE reading changes
+        # nothing and a free variable in it is only somewhere for two
+        # validators to differ.
+        return _vector(A_INCONCLUSIVE, AGE_NEVER, 0, True, False)
+
+    return _vector(A_INACTIVE, age_bucket, count_bucket, True, True)
 
 
 def _reason(vector: dict, chain: str, window: int) -> str:
@@ -656,6 +888,17 @@ def _reason(vector: dict, chain: str, window: int) -> str:
     where = "the " + str(chain) + " explorer"
 
     if status == A_INCONCLUSIVE:
+        # TWO WAYS TO HAVE NO VERDICT, and they are different facts about the
+        # world, so they are different sentences. `src_ok` is what separates
+        # them and it is already on the consensus axis, so both sentences are
+        # composed from agreed fields and neither is written by a leader.
+        if bool(vector.get("src_ok")):
+            return ("No verdict: " + where + " answered, but the history it "
+                    "returned does not reach back as far as the owner's last "
+                    "check-in, so it cannot rule out a transaction signed "
+                    "since. Evidence that does not cover the question is not "
+                    "evidence of absence. Nothing was changed and this claim "
+                    "can be made again.")
         return ("No verdict: " + where + " did not return a readable "
                 "transaction list for this wallet. Nothing was changed and "
                 "this claim can be made again once the explorer answers.")
@@ -675,8 +918,9 @@ def _reason(vector: dict, chain: str, window: int) -> str:
             "signature is " + AGE_WORDS[age] + ", and " + COUNT_WORDS[count]
             + " in the last " + str(int(window)) + " "
             + _plural(int(window), "transaction", "transactions")
-            + " examined. Inbound transfers were ignored: only a signature "
-            "proves the key holder is present.")
+            + " examined. Only transactions this wallet SIGNED were counted, "
+            "over history covering the whole period since that check-in: "
+            "inbound transfers can neither prove life nor hide it.")
 
 
 # The bucket vocabularies the reasoning reads from. Indexed 0..7 to match the
@@ -724,6 +968,10 @@ def _coherent(payload: typing.Any) -> bool:
     if not isinstance(src, bool):
         return False
 
+    cov = payload.get("cov_ok")
+    if not isinstance(cov, bool):
+        return False
+
     # `bool` is an `int` in Python, so a bucket that arrived as `True` would
     # otherwise pass as bucket 1.
     for key in ("age_bucket", "count_bucket"):
@@ -746,7 +994,17 @@ def _coherent(payload: typing.Any) -> bool:
     # RELEASES MONEY is not. A leader claiming INACTIVE while admitting it
     # could not read the explorer is refused here, by every validator, without
     # any of them needing to fetch anything.
-    if bool(src) != (status != A_INCONCLUSIVE):
+    if (bool(src) and bool(cov)) != (status != A_INCONCLUSIVE):
+        return False
+
+    # A source that did not answer cannot have proven anything about how far
+    # back its answer reached. The biconditional above already forces this
+    # payload to INCONCLUSIVE, which changes nothing - but it would leave
+    # `src_ok=false, cov_ok=true` as a spellable combination that no honest
+    # probe can produce, and a spellable impossibility is a place for a future
+    # reader to build a wrong assumption. There is one way to say "no verdict
+    # because the explorer was silent", and this is what makes it one.
+    if not bool(src) and bool(cov):
         return False
 
     # An unreadable source cannot have counted anything. Pinning the buckets
@@ -762,13 +1020,22 @@ def _coherent(payload: typing.Any) -> bool:
     if status == A_ALIVE and _as_int(payload.get("count_bucket"), -1) <= 0:
         return False
 
+    # ...and it cannot have a datable newest signature either. An empty set of
+    # signatures pins the age to AGE_NEVER in `_probe`, so "no signature was
+    # found at all" alongside "the newest one is less than a day old" is a pair
+    # no honest probe can produce - and `_reason` would otherwise compose a
+    # stored sentence that contradicts itself in the same breath.
+    if (_as_int(payload.get("count_bucket"), -1) == 0
+            and _as_int(payload.get("age_bucket"), -1) != AGE_NEVER):
+        return False
+
     return True
 
 
 def _agrees(theirs: typing.Any, mine: dict) -> bool:
     """Does the leader's vector match this validator's, field for field?
 
-    RULE 1, discharged. Five fields, and the comparison is EXACT - there is no
+    RULE 1, discharged. Six fields, and the comparison is EXACT - there is no
     tolerance here, and the tolerance that does exist lives in the ladders
     where a bucket is wide enough to absorb a replica being half a block
     behind. A tolerance in the comparison instead would mean two accepted
@@ -777,12 +1044,14 @@ def _agrees(theirs: typing.Any, mine: dict) -> bool:
     if not isinstance(theirs, dict) or not isinstance(mine, dict):
         return False
     for key in ("activity_status", "age_bucket", "count_bucket", "src_ok",
-                "content_hash"):
+                "cov_ok", "content_hash"):
         if key not in theirs or key not in mine:
             return False
     if str(theirs["activity_status"]) != str(mine["activity_status"]):
         return False
     if bool(theirs["src_ok"]) != bool(mine["src_ok"]):
+        return False
+    if bool(theirs["cov_ok"]) != bool(mine["cov_ok"]):
         return False
     # Buckets are compared as INTEGERS OF THE RIGHT TYPE, not as whatever
     # `_as_int` can coerce. Coercing here would make the string "7" equal to
@@ -899,6 +1168,7 @@ class Will:
     last_age_bucket: u32
     last_count_bucket: u32
     last_src_ok: bool
+    last_cov_ok: bool
     last_content_hash: str
     last_anchor_ts: u64
     last_now_ts: u64
@@ -1198,6 +1468,7 @@ class WillExecutor(gl.contract.Contract):
         will.last_count_bucket = u32(_clamp(
             _as_int(vector.get("count_bucket"), 0), 0, TOP_BUCKET))
         will.last_src_ok = bool(vector.get("src_ok"))
+        will.last_cov_ok = bool(vector.get("cov_ok"))
         will.last_content_hash = str(vector.get("content_hash", ""))
         will.last_anchor_ts = u64(int(facts["last_heartbeat"]))
         will.last_now_ts = u64(now)
@@ -1462,6 +1733,7 @@ class WillExecutor(gl.contract.Contract):
         will.last_age_bucket = u32(0)
         will.last_count_bucket = u32(0)
         will.last_src_ok = False
+        will.last_cov_ok = False
         will.last_content_hash = ""
         will.last_anchor_ts = u64(0)
         will.last_now_ts = u64(0)
@@ -1715,6 +1987,7 @@ class WillExecutor(gl.contract.Contract):
             "age_bucket": _as_int(out.get("age_bucket"), TOP_BUCKET),
             "count_bucket": _as_int(out.get("count_bucket"), 0),
             "src_ok": bool(out.get("src_ok")),
+            "cov_ok": bool(out.get("cov_ok")),
             "content_hash": str(out.get("content_hash", "")),
         }
 
@@ -2014,6 +2287,7 @@ class WillExecutor(gl.contract.Contract):
             "count_meaning": (COUNT_WORDS[int(will.last_count_bucket)]
                               if str(will.last_verdict) else ""),
             "src_ok": bool(will.last_src_ok),
+            "cov_ok": bool(will.last_cov_ok),
             "content_hash": str(will.last_content_hash),
             "anchor_ts": int(will.last_anchor_ts),
             "checked_at": int(will.last_now_ts),
@@ -2214,7 +2488,8 @@ class WillExecutor(gl.contract.Contract):
                           "finder_fee_bps", "stall_ttl_s"],
             "consensus": {
                 "compared_fields": ["activity_status", "age_bucket",
-                                    "count_bucket", "src_ok", "content_hash"],
+                                    "count_bucket", "src_ok", "cov_ok",
+                                    "content_hash"],
                 "verdicts": list(VERDICTS),
                 "age_ladder_days": list(AGE_LADDER),
                 "count_ladder": list(COUNT_LADDER),
@@ -2225,6 +2500,19 @@ class WillExecutor(gl.contract.Contract):
                     "only transactions the wallet SENT count as activity; "
                     "inbound transfers are ignored so that a stranger cannot "
                     "keep a will locked with one wei"),
+                "outbound_source": "blockscout /api/v2 ?filter=from",
+                "outbound_source_note": (
+                    "the history is fetched OUTBOUND-ONLY at the source rather "
+                    "than filtered by signer after the fact; filtering a page "
+                    "of mixed account activity lets inbound transfers push the "
+                    "owner's own last signature off the page"),
+                "coverage_required_for_release": True,
+                "coverage_note": (
+                    "an INACTIVE verdict additionally requires cov_ok: the "
+                    "fetched history must be a complete history, or must reach "
+                    "back past the anchor. Where bounded evidence cannot prove "
+                    "that, the verdict is INCONCLUSIVE and nothing moves"),
+                "max_fetches_per_probe": 2,
                 "anchor": "the will's last_heartbeat",
                 "uses_language_model": False,
                 "uses_language_model_note": (
@@ -2263,6 +2551,7 @@ class WillExecutor(gl.contract.Contract):
             "age_bucket": int(will.last_age_bucket),
             "count_bucket": int(will.last_count_bucket),
             "src_ok": bool(will.last_src_ok),
+            "cov_ok": bool(will.last_cov_ok),
         }
         canon = _canon(int(will.will_id), str(will.chain), will.owner.as_hex,
                        int(will.last_anchor_ts), int(will.last_now_ts),
@@ -2308,9 +2597,11 @@ class WillExecutor(gl.contract.Contract):
             })
             checks.append({
                 "check": "a release was authorised by an INACTIVE reading "
-                         "from a source that answered",
+                         "from a source that answered, over history that "
+                         "reached back past the last check-in",
                 "ok": bool(str(will.last_verdict) == A_INACTIVE
-                           and bool(will.last_src_ok)),
+                           and bool(will.last_src_ok)
+                           and bool(will.last_cov_ok)),
             })
 
         all_ok = True

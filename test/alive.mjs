@@ -151,34 +151,51 @@ const baseBalance = await baseRead.getBalance({ address: OWNER });
 console.log(`  ${WATCH} balance ${gen(baseBalance)} ETH (testnet)`);
 if (baseBalance < 10n ** 14n) { bad("not enough testnet gas to send a transaction"); process.exit(1); }
 
-/** The exact URL the contract builds — so we poll what the validators will read. */
+/**
+ * The exact URL the contract builds — so we poll what the validators will read.
+ *
+ * `?filter=from` is the fix this run exists to demonstrate: the page is
+ * OUTBOUND ONLY, server-side, so the owner's signature cannot be pushed out of
+ * view by inbound traffic they do not control. Polling the old `txlist` URL
+ * here would be polling a different question from the one the round asks.
+ */
 const probeUrl = (addr) =>
-  `https://${EXPLORER}/api?module=account&action=txlist&address=${addr.toLowerCase()}&sort=desc&page=1&offset=10`;
+  `https://${EXPLORER}/api/v2/addresses/${addr.toLowerCase()}/transactions?filter=from`;
 
 /** Newest transaction SIGNED BY this wallet, as the contract counts them. */
 async function newestSigned(addr) {
-  const doc = await fetch(probeUrl(addr)).then((r) => r.json()).catch(() => null);
-  const items = doc?.result;
-  // `result` is a LIST when the explorer answered (even an empty one) and
-  // null/absent when it refused — the same distinction the contract makes in
-  // `_parse`, and the reason a 429 can never read as "this wallet is dormant".
-  if (!Array.isArray(items)) return { readable: false, newest: 0, signed: 0 };
-  const mine = items.filter((t) => String(t.from ?? "").toLowerCase() === addr.toLowerCase());
-  const newest = mine.reduce((m, t) => Math.max(m, Number(t.timeStamp ?? 0)), 0);
-  return { readable: true, newest, signed: mine.length };
+  const res = await fetch(probeUrl(addr)).catch(() => null);
+  if (!res || res.status !== 200) return { readable: false, newest: 0, signed: 0, foreign: 0 };
+  const doc = await res.json().catch(() => null);
+  const items = doc?.items;
+  // `items` is a LIST when the explorer answered (even an empty one) and
+  // absent when it refused — the same distinction the contract makes in
+  // `_parse_v2`, and the reason a 429 or a 422 can never read as "this wallet
+  // is dormant".
+  if (!Array.isArray(items)) return { readable: false, newest: 0, signed: 0, foreign: 0 };
+  const me = addr.toLowerCase();
+  const mine = items.filter((t) => String(t.from?.hash ?? "").toLowerCase() === me);
+  const newest = mine.reduce(
+    (m, t) => Math.max(m, Math.floor(Date.parse(t.timestamp ?? 0) / 1000) || 0), 0);
+  // The contract verifies the filter rather than trusting it, and so does this.
+  // A non-zero count here would mean the explorer ignored `filter=from`, and
+  // the round would fall back to proving coverage instead of taking the
+  // outbound-only shortcut.
+  return { readable: true, newest, signed: mine.length, foreign: items.length - mine.length };
 }
 
 // ---------------------------------------------------------------------------
 head("1. Where the wallet stands before the will exists");
 const before = await newestSigned(OWNER);
 console.log(`  explorer readable ${before.readable}, ${before.signed} signed tx in the window`);
+console.log(`  filter=from honoured: ${before.foreign === 0} (${before.foreign} non-outbound items returned)`);
 console.log(`  newest signature  ${before.newest} (${new Date(before.newest * 1000).toISOString()})`);
 // Deliberately NOT asserted here: on a resumed run the post-anchor signature
 // already exists, and claiming otherwise would be describing a state this
 // script had itself already changed. The anchor comparison that matters is
 // made in step 3, against the will's real `last_heartbeat`.
 console.log(`  (whether that counts as ALIVE depends entirely on the anchor, which step 2 fixes)`);
-note({ step: "before", newest_signed: before.newest, signed_count: before.signed });
+note({ step: "before", newest_signed: before.newest, signed_count: before.signed, foreign_items: before.foreign, probe_url: probeUrl(OWNER) });
 
 // ---------------------------------------------------------------------------
 head("2. Create the will (this fixes the anchor)");
@@ -389,7 +406,7 @@ for (let attempt = 1; attempt <= 6; attempt++) {
   will = JSON.parse(await c.view("get_will", [WILL_ID])).will;
   outcome = json?.outcome ?? will.evidence.activity_status;
   attempts.push({ attempt, outcome, seconds: out.seconds, tx: out.hash,
-                  src_ok: will.evidence.src_ok });
+                  src_ok: will.evidence.src_ok, cov_ok: will.evidence.cov_ok });
   console.log(`  attempt ${attempt}: ${outcome} in ${out.seconds.toFixed(0)}s  (src_ok=${will.evidence.src_ok})`);
   claim = out;
   if (outcome !== "INCONCLUSIVE") break;
@@ -409,6 +426,7 @@ console.log(`      activity_status ${ev.activity_status}`);
 console.log(`      age_bucket      ${ev.age_bucket}  (${ev.age_meaning})`);
 console.log(`      count_bucket    ${ev.count_bucket}  (${ev.count_meaning})`);
 console.log(`      src_ok          ${ev.src_ok}`);
+console.log(`      cov_ok          ${ev.cov_ok}`);
 console.log(`      content_hash    ${ev.content_hash}`);
 console.log(`      reason          ${ev.reason}`);
 
@@ -421,6 +439,8 @@ if (ev.age_bucket === 0) ok("age_bucket is 0 — the newest signature is less th
 else console.log(`  \x1b[33m-\x1b[0m age_bucket is ${ev.age_bucket}`);
 if (ev.src_ok === true) ok("src_ok is true — the verdict is evidence-backed");
 else bad("src_ok is false");
+if (ev.cov_ok === true) ok("cov_ok is true — the evidence reached the question it was asked");
+else bad("cov_ok is false");
 
 // The point of the whole exercise: the money did not move.
 const lockedAfter = JSON.parse(await c.view("get_stats")).ledger.locked_wei;
@@ -449,7 +469,7 @@ if (verified.verified) ok(`verify_claim re-derives all ${verified.checks.length}
 else bad("verify_claim failed", JSON.stringify(verified.checks));
 console.log(`      projection: ${verified.canonical_projection}`);
 
-note({ step: "verdict", outcome, will_id: WILL_ID, claim_tx: claim?.hash,
+note({ step: "verdict", cov_ok: ev.cov_ok, outcome, will_id: WILL_ID, claim_tx: claim?.hash,
        evidence: ev, settlement: will.settlement, status: will.status,
        deposit_wei: will.deposit_wei, locked_before: lockedBefore,
        locked_after: lockedAfter, owed_beneficiary: owedHeir, owed_finder: owedFinder,

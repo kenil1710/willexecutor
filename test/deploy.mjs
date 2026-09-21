@@ -34,6 +34,13 @@ if (!chain) throw new Error(`unknown network ${networkName}`);
 const both = process.argv.includes("--both");
 const demoOnly = process.argv.includes("--demo");
 
+/** `RUBRIC_VERSION` as the contract itself declares it. */
+function rubricVersion(source) {
+  const m = String(source).match(/^RUBRIC_VERSION\s*=\s*"([^"]+)"/m);
+  if (!m) throw new Error("no RUBRIC_VERSION in the contract source");
+  return m[1];
+}
+
 const acc = accounts();
 const account = createAccount(acc.client.key);
 const wallet = createClient({ chain, account });
@@ -107,7 +114,12 @@ for (const name of wanted) {
     deploy_tx: res.hash,
     source_bytes: code.length,
     owner: account.address,
-    rubric_version: "1.0.0",
+    // READ OUT OF THE SOURCE, never retyped here. This was a hardcoded
+    // "1.0.0" and it silently recorded the wrong rubric the first time the
+    // contract's consensus projection changed — a deployments file that
+    // disagrees with the bytes it describes is worse than one that omits the
+    // field, because it is believed.
+    rubric_version: rubricVersion(code),
     min_interval_s: args[0],
     max_interval_s: args[1],
     interval_unit_s: args[2],

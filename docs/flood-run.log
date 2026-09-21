@@ -1,0 +1,79 @@
+
+[1mWillExecutor — the inbound flood, on chain[0m
+  demo contract  0xDb7ED7C86412d73D469f4f6F8148E76324fB9518
+  will owner     0xBe9eE23694b69d287FbE096AB3E37f61Cff7B802
+  watched chain  sepolia (eth-sepolia.blockscout.com)
+  flood size     20 inbound transfers (the legacy page holds 10)
+
+[1m0. Safety: the key must be testnet-only[0m
+  [32m✔[0m zero balance on ethereum, base, arbitrum and polygon mainnets
+  sepolia balance 0.119847 ETH (testnet)
+
+[1m1. Clear the way, then create the will (this fixes the anchor)[0m
+  cancelled prior will #4 so this run starts from a clean anchor
+  tx 0x798d0da8be25ad3ee518fe9eada9471ec0b20201c26b2674ff0b459e3d8f5b08
+  [32m✔[0m will #5: 5.00 GEN, 300s interval, watching sepolia
+  anchor (last_heartbeat) 1789995699
+  claimable at            1789996299 (in 593s)
+
+[1m2. The owner signs — they are alive[0m
+  burner 0xe072543c35508BF6ad68b02109d4446DecE5735F (generated in memory, key never leaves this process)
+  sepolia tx 0x14afcc903d042824a9b8b0373dc8c8bc8018605793adca78acd805aed48f1ef5  (owner → burner)
+  [32m✔[0m mined in block 11751065  status success
+  [32m✔[0m the owner's signature is AFTER the anchor  1789995720 > 1789995699
+
+[1m3. The flood: 20 inbound transfers, all newer than that signature[0m
+  sent 1/20  sent 2/20  sent 3/20  sent 4/20  sent 5/20  sent 6/20  sent 7/20  sent 8/20  sent 9/20  sent 10/20  sent 11/20  sent 12/20  sent 13/20  sent 14/20  sent 15/20  sent 16/20  sent 17/20  sent 18/20  sent 19/20  sent 20/20
+  [32m✔[0m all 20 mined, last in block 11751068  36s after the owner's signature
+
+[1m4. Wait for the explorer to index the flood[0m
+  waiting 150s before the first look — making no requests meanwhile
+  [32m✔[0m the owner's signature is indexed  newest 1789995720 > anchor 1789995699
+  [32m✔[0m the flood has buried it  the legacy page is 10 inbound, 0 signed
+
+[1m5. THE SAME QUESTION, THE TWO ENDPOINTS, THE SAME INSTANT[0m
+
+  the REJECTED probe — GET /api?…&action=txlist&…&offset=10
+      page of 10: 10 inbound, 0 signed by the owner
+      signatures after the anchor: 0
+      [31mwould have concluded INACTIVE[0m
+
+  the DEPLOYED probe — GET /api/v2/addresses/{owner}/transactions?filter=from
+      page of 11: 0 not outbound, 11 signed by the owner
+      signatures after the anchor: 1  (newest 1789995720)
+      [32mconcludes ALIVE[0m
+
+  [32m✔[0m the rejected probe is blind here — the owner's signature is off its page
+  [32m✔[0m filter=from was honoured — every returned item is outbound
+  [32m✔[0m the deployed probe sees the signature the rejected one missed
+
+[1m6. Let the check-in threshold expire[0m
+  waiting 376s — the owner is deliberately NOT checking in
+  [32m✔[0m the will is past its threshold and anyone may claim it
+
+[1m7. claim_inactive — with real validators, through the flood[0m
+  attempt 1: ALIVE in 13s  (src_ok=true, cov_ok=true)
+
+[1m8. The verdict, and that nothing moved[0m
+      activity_status ALIVE
+      age_bucket      0  (less than a day old)
+      count_bucket    4  (eight to fifteen signatures were found)
+      src_ok          true
+      cov_ok          true
+      content_hash    f197ba0872ad8c16
+      reason          Still alive: this wallet signed at least one transaction AFTER the owner's last heartbeat, according to the sepolia explorer. The newest signature is less than a day old, and eight to fifteen signatures were found in the last 50 transactions examined. Missing a check-in is not the same as being gone, so the deposit stays where it is.
+  [32m✔[0m VERDICT: ALIVE — the flood did not hide the owner's signature
+  [32m✔[0m cov_ok is true — the evidence reached the question it was asked
+  [32m✔[0m src_ok is true — the verdict is evidence-backed
+  [32m✔[0m count_bucket is 4 — signatures were counted, not assumed
+  [32m✔[0m the will is still ACTIVE — it was not executed
+  [32m✔[0m the deposit is untouched: 5.000000 GEN still locked
+  [32m✔[0m nothing was paid to the beneficiary and nothing to the finder
+  [32m✔[0m the contract's locked total is unchanged (5.000000 GEN)
+  [32m✔[0m this round credited nobody — the beneficiary's and finder's ledgers are unchanged  heir 0.000000, finder 0.000000 GEN, both carried in from earlier runs
+  [32m✔[0m ledger identity still holds
+  [32m✔[0m verify_claim re-derives all 3 checks from storage alone
+      projection: v1.1.0|will=5|chain=sepolia|wallet=0xbe9ee23694b69d287fbe096ab3e37f61cff7b802|anchor=1789995699|now=1789996316|window=50|status=ALIVE|age=0|count=4|src=1|cov=1
+
+[1m[32mThe inbound flood was survived on chain — the estate stayed locked[0m
+evidence written to docs/flood-evidence.json

@@ -46,7 +46,7 @@ for (const name of ["WillExecutor", "WillExecutorDemo"]) {
 
   // The compared axis is a property of the deployed code, so read it back.
   const axis = cfg.consensus.compared_fields.join(",");
-  if (axis === "activity_status,age_bucket,count_bucket,src_ok,content_hash") {
+  if (axis === "activity_status,age_bucket,count_bucket,src_ok,cov_ok,content_hash") {
     ok(`${name} compares the whole feature vector, not just the verdict`);
   } else bad(`${name} compares ${axis}`);
 
@@ -55,6 +55,22 @@ for (const name of ["WillExecutor", "WillExecutorDemo"]) {
 
   if (cfg.consensus.signed_only === true) ok(`${name} counts signatures only, never inbound transfers`);
   else bad(`${name} does not declare signed_only`);
+
+  // THE REJECTION, ASSERTED AGAINST THE DEPLOYED BYTES. Filtering a mixed page
+  // by signer is not the same as fetching a page of signatures, and a release
+  // on history that never reached the anchor is a release on evidence that
+  // could not have contained the counterexample.
+  if (String(cfg.consensus.outbound_source ?? "").includes("filter=from")) {
+    ok(`${name} fetches outbound-only history at the source`);
+  } else bad(`${name} does not declare an outbound-only source`);
+
+  if (cfg.consensus.coverage_required_for_release === true) {
+    ok(`${name} requires proven coverage before a release`);
+  } else bad(`${name} does not require coverage before a release`);
+
+  if (cfg.consensus.max_fetches_per_probe === 2) {
+    ok(`${name} bounds a probe at two fetches (no rate-limiting walk)`);
+  } else bad(`${name} declares ${cfg.consensus.max_fetches_per_probe} fetches per probe`);
 
   // Pause must not gate any withdrawal path.
   for (const m of ["heartbeat", "claim_inactive", "cancel_will", "settle_stalled", "claim_payout"]) {

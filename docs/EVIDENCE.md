@@ -1,16 +1,24 @@
 # What happened on chain
 
-A run of `test/seed.mjs` against GenLayer Studio Dev on **2026-09-18**, 17:54:23 to 17:59:50 UTC. Machine-readable form: [`evidence.json`](evidence.json). Raw
+A run of `test/seed.mjs` against GenLayer Studio Dev on **2026-09-21**, starting 12:38:15 UTC. Machine-readable form: [`evidence.json`](evidence.json). Raw
 console output: [`seed-run.log`](seed-run.log).
 
 **All checks passed.** What follows includes the things that were *not*
 demonstrated, in §7, because a demo that quietly omits them is worse than one
 that says so.
 
+> **Provenance.** This contract was **rejected** for a real bug — a probe that
+> could read a living owner as gone — and redeployed after the fix. Every
+> section below was re-run against the **current** deployment, whose rubric
+> version is `1.1.0` and whose compared axis carries the `cov_ok` field that did
+> not exist before. §10 is the new one: the rejected attack, staged on a public
+> chain against the deployed bytes. The bug and the fix are described in
+> `README.md` and in `contracts/NOTES.md` §3–§4.
+
 | | address |
 |---|---|
-| WillExecutor (canonical, 7–365 day intervals) | `0xa3eF4Ee2a69b38d20866A80be054c79282b4c03e` |
-| WillExecutorDemo (same source, clock in seconds) | `0x766897eb88F5D7dbb2734A0501fA97eFDb3cd1d0` |
+| WillExecutor (canonical, 7–365 day intervals) | `0x8862e1CcB90529Ff7e17DC80e0A13148d3530d98` |
+| WillExecutorDemo (same source, clock in seconds) | `0xDb7ED7C86412d73D469f4f6F8148E76324fB9518` |
 
 ---
 
@@ -18,9 +26,9 @@ that says so.
 
 | id | owner → beneficiary | deposit | interval | watched chain | tx | settled |
 |---|---|---|---|---|---|---|
-| 1 | `0x7370…7Ebd` → `0xDbdF…e420` | 5 GEN | 30 days | ethereum | `0xf0fc4bc5f987c62e47…` | 7s |
-| 2 | `0x150d…8FDb` → `0xE97A…769d` | 12 GEN | 90 days | base | `0x453c4b61a32e72b696…` | 7s |
-| 3 | `0x6a34…a338` → `0x0dc1…F8F1` | 3 GEN | 365 days | arbitrum | `0x0136192e659653b020…` | 9s |
+| 1 | `0x7370…7Ebd` → `0xDbdF…e420` | 5 GEN | 30 days | ethereum | `0x52ae2c9cac6a5166b9…` | 10s |
+| 2 | `0x150d…8FDb` → `0xE97A…769d` | 12 GEN | 90 days | base | `0xfc34e36c5a4f94cc04…` | 35s |
+| 3 | `0x6a34…a338` → `0x0dc1…F8F1` | 3 GEN | 365 days | arbitrum | `0xe546c12b6e059351ae…` | 10s |
 
 20 GEN locked. `get_stats` afterwards:
 
@@ -232,8 +240,12 @@ node seed.mjs              # ~6 minutes, rewrites docs/evidence.json
 ```
 
 ```bash
-./tools/audit.sh --chain   # 38 static checks + the live contracts
-python3 test/test_logic.py # 440 offline tests
+node flood.mjs             # the rejected attack, staged on chain (~15 minutes)
+```
+
+```bash
+./tools/audit.sh --chain   # 51 static checks + the live contracts
+python3 test/test_logic.py # 494 offline tests
 ```
 
 Note that `node accounts.mjs` preserves existing roles unless `--force` is
@@ -246,7 +258,8 @@ the contract working.
 
 ## 9. The ALIVE verdict, on chain
 
-`test/alive.mjs`, one invocation, 2026-09-18 19:02:23 → 19:15:35 UTC.
+`test/alive.mjs`, one invocation, **2026-09-21 12:46:15 UTC**, against the
+redeployed contract (rubric `1.1.0`, outbound-only probe).
 Machine-readable: [`alive-evidence.json`](alive-evidence.json). Console:
 [`alive-run.log`](alive-run.log).
 
@@ -269,14 +282,14 @@ from an existing dev `.env`, never copied, printed or committed.
 
 | step | fact |
 |---|---|
-| before | the wallet's newest signature is `1789757688`; nothing newer exists |
-| **create_will** | `0x5dbe233c35274a48f43a6bdf018d297d3fe60b82af2d218fda26e950e581d938` → **will #6**, 6 GEN, 90 s interval, watching `sepolia` |
-| anchor | `last_heartbeat = 1789758155`, claimable at `1789758335` |
+| before | the wallet's newest signature is `1789993452`; the outbound-only page returns **8 items, 0 of them foreign** — `filter=from` was honoured |
+| **create_will** | `0x4bcb47781649ba3e222f279fd005c611c58197ccfc37568f528bc2c69cd1e41f` → **will #3**, 6 GEN, 90 s interval, watching `sepolia` |
+| anchor | `last_heartbeat = 1789994790`, claimable at `1789994970` |
 | assertion | *every existing signature is OLDER than the anchor* — so nothing yet says ALIVE |
-| **sepolia tx** | `0xec39fa7ea1169b6abcc0314fb8d714bdf4d4a0044809d19f45f8c2f96f0959ca`, block `11732605`, status success |
-| indexed | Blockscout reports it at `1789758168` — **13 s after the anchor** |
+| **sepolia tx** | `0x8d76f80321cf137ffb6859986bc93b304708849cbe59a5a74a072af6957beb8b`, status success |
+| indexed | Blockscout reports it at `1789994808` — **18 s after the anchor** |
 | threshold | expires; the owner deliberately does **not** check in |
-| **claim_inactive** | `0xc5af390ae344f318bd13d6f0df120cefc69de56d7692c1fa645c600be20de82e` |
+| **claim_inactive** | `0xfa33826c61f2674d8c4a2eafdb2d052b16f1756d9262d06e9fbd1840a089bc6f` |
 
 The order is the point. The anchor is fixed *before* the signature exists, so
 the only way a validator can answer ALIVE is by actually fetching the wallet's
@@ -284,26 +297,23 @@ history and finding something newer than a timestamp that was already on chain.
 
 ### The verdict
 
-Settled in **16 seconds**, first attempt:
+Settled in **8 seconds**, first attempt:
 
 | compared field | value |
 |---|---|
 | `activity_status` | **`ALIVE`** |
 | `age_bucket` | `0` — *less than a day old* |
-| `count_bucket` | `3` — *four to seven signatures were found* |
+| `count_bucket` | `4` — *eight to fifteen signatures were found* |
 | `src_ok` | `true` |
-| `content_hash` | `b3698b76cf9fc279` |
+| `cov_ok` | `true` — *the evidence reached the question it was asked* |
+| `content_hash` | `9b97b5ae8d7576a1` |
 
 ```
-v1.0.0|will=6|chain=sepolia|wallet=0xbe9ee23694b69d287fbe096ab3e37f61cff7b802
-      |anchor=1789758155|now=1789758493|window=10|status=ALIVE|age=0|count=3|src=1
+v1.1.0|will=3|chain=sepolia|wallet=0xbe9ee23694b69d287fbe096ab3e37f61cff7b802
+      |anchor=1789994790|now=1789994985|window=50|status=ALIVE|age=0|count=4|src=1|cov=1
 ```
 
-> Still alive: this wallet signed at least one transaction AFTER the owner's
-> last heartbeat, according to the sepolia explorer. The newest signature is
-> less than a day old, and four to seven signatures were found in the last 10
-> transactions examined. Missing a check-in is not the same as being gone, so
-> the deposit stays where it is.
+> Still alive: this wallet signed at least one transaction AFTER the owner's last heartbeat, according to the sepolia explorer. The newest signature is less than a day old, and eight to fifteen signatures were found in the last 50 transactions examined. Missing a check-in is not the same as being gone, so the deposit stays where it is.
 
 `count_bucket = 3` matters as much as the verdict: the validators did not just
 answer "alive", they **counted signatures**, and the count is on the compared
@@ -312,14 +322,14 @@ axis. An answer nobody could have produced without reading the chain.
 ### And the money did not move
 
 ```
-will #6 status            ACTIVE      (not EXECUTED)
+will #3 status            ACTIVE      (not EXECUTED)
 deposit                   6.000000 GEN, unchanged
 contract locked total     6000000000000000000 → 6000000000000000000
 paid to beneficiary       0
 paid to finder            0
 beneficiary owed          0
 ledger identity           holds
-verdict counters          alive=3  inactive=1  inconclusive=0
+verdict counters          alive=1  inactive=0  inconclusive=0
 ```
 
 **The owner missed every check-in and the estate stayed locked**, because the
@@ -356,3 +366,136 @@ wrong for producing evidence: a resumed run reuses a will whose post-anchor
 signature it had already sent, so the ordering that makes the result meaningful
 is not visible in that run's own log. `alive-reset.mjs` exists so the evidence
 run can be a single clean invocation — which is what the table above is.
+
+---
+
+## 10. The rejected bug, staged on a public chain
+
+**This contract was rejected for a probe that could read a living owner as
+gone.** §10 is that attack, executed against the deployed contract with real
+transactions, a real explorer and real validators — not a unit test.
+
+`test/flood.mjs`, one invocation, **2026-09-21 13:01:19 UTC**.
+Machine-readable: [`flood-evidence.json`](flood-evidence.json).
+
+### What the reviewer found
+
+> The current probe fetches only the newest ten account transactions and then
+> filters by sender, so newer inbound transfers can hide an owner-signed
+> transaction made after the heartbeat and incorrectly release the estate.
+
+The assumption underneath the old probe was never stated, and being unstated is
+why it survived both the original submission and a self-audit looking for
+exactly this class of problem: *a page with no signature on it is a wallet with
+no signature after the anchor.* That holds only if the page reaches back to the
+anchor. An owner who signs and then receives ten inbound transfers has pushed
+their own signature off the page.
+
+**It is not only an attack.** Measured 2026-09-21, the ten newest transactions
+of `vitalik.eth` are all inbound while its newest outbound transaction is a
+month old. Any wallet that receives more than it sends stages this by accident.
+
+### The sequence, in order
+
+| step | fact |
+|---|---|
+| **create_will** | `0x798d0da8be25ad3ee518fe9eada9471ec0b20201c26b2674ff0b459e3d8f5b08` → **will #5**, 5 GEN, 300 s interval, watching `sepolia` |
+| anchor | `last_heartbeat = 1789995699`, claimable at `1789996299` |
+| **the owner signs** | `0x14afcc903d042824a9b8b0373dc8c8bc8018605793adca78acd805aed48f1ef5` at `1789995720` — **21 s after the anchor**. By this contract's own definition they are alive. |
+| **the flood** | 20 transfers from a burner wallet **to** the owner, last mined in block `11751068` at `1789995756` — every one newer than the owner's signature, and not one signed by the owner |
+| indexing gate | the script refuses to claim until Blockscout shows **both** the post-anchor signature *and* a legacy page with the signature buried — see [the two runs that did not prove it](#two-runs-that-did-not-prove-it-and-why-they-are-in-this-document) |
+| **claim_inactive** | `0x708b2bc619f7d52f352603c3b51e20399216f2b825a8ab02ad2a6d11b09fe12a` |
+
+The order is the point. The anchor is fixed before the signature exists, and the
+flood arrives after it, so the only way to answer `ALIVE` is to fetch history
+that the flood cannot displace.
+
+### The same question, the two endpoints, the same instant
+
+This is the whole rejection and the whole fix, side by side. One wallet, one
+anchor, two URLs:
+
+| | the **rejected** probe | the **deployed** probe |
+|---|---|---|
+| URL | `…/api?…&action=txlist&…&offset=10` | `…/api/v2/addresses/{owner}/transactions?filter=from` |
+| page returned | 10 transactions | 11 transactions |
+| signed by the owner | **0** | **11** |
+| not signed by the owner | 10 | 0 |
+| signatures after the anchor | **0** | **1** |
+| verdict | **`INACTIVE`** — releases the estate | **`ALIVE`** |
+
+The legacy page is not wrong about anything. It faithfully returns the ten
+newest transactions of the account, and all ten of them really are inbound. It
+is simply answering a different question from the one being asked — and the old
+probe could not tell the difference.
+
+**The contract does not take the right-hand column on trust.** `filter=from` is
+what makes this page *useful*; it is not what makes the verdict *safe*. Coverage
+is proved from the page itself — it is short, or it reaches back past the anchor
+— and that test is applied identically whichever endpoint answered and whether
+or not the filter was honoured. Had the explorer silently returned the mixed
+page instead (which the legacy endpoint measurably does with its own
+`filterby=from`), the newest 10 transactions would not have reached
+the anchor, and the round would have answered `INCONCLUSIVE` rather than
+releasing anything.
+
+### The verdict
+
+Settled in **13 seconds**, first attempt:
+
+| compared field | value |
+|---|---|
+| `activity_status` | **`ALIVE`** |
+| `age_bucket` | `0` — *less than a day old* |
+| `count_bucket` | `4` — *eight to fifteen signatures were found* |
+| `src_ok` | `true` |
+| `cov_ok` | `true` |
+| `content_hash` | `f197ba0872ad8c16` |
+
+> Still alive: this wallet signed at least one transaction AFTER the owner's last heartbeat, according to the sepolia explorer. The newest signature is less than a day old, and eight to fifteen signatures were found in the last 50 transactions examined. Missing a check-in is not the same as being gone, so the deposit stays where it is.
+
+### And the money did not move
+
+```
+will #5 status            ACTIVE      (not EXECUTED)
+deposit                   5.000000 GEN, unchanged
+contract locked total     5000000000000000000 → 5000000000000000000
+paid to beneficiary       0
+paid to finder            0
+beneficiary ledger        0 → 0  (unchanged)
+finder ledger             0 → 0  (unchanged)
+verify_claim              3/3 checks re-derive from storage alone
+```
+
+The beneficiary and finder ledgers are **not zero**, and that is deliberate
+reporting rather than a blemish. Payouts here are *pulled*, so those balances
+accumulate across runs on a demo instance — including from [the first attempt at
+this very script](#a-run-that-failed-and-why-it-is-in-this-document). What this
+round has to prove is that it credited **nobody**, so the assertion is before
+against after.
+
+### Two runs that did not prove it, and why they are in this document
+
+Neither was a contract bug. Both were the demonstration measuring the explorer's
+indexing lag instead of the contract, and both are recorded because an evidence
+document that contains only successful runs is not evidence.
+
+**The first attempt released the estate.** It waited a fixed 150 seconds for
+Blockscout to index and then claimed. Blockscout was more than five minutes
+behind. The validators fetched an outbound-only page whose newest entry predated
+the anchor, found no signature after it, and answered `INACTIVE` — **a correct
+reading of the evidence that existed**, and a useless demonstration of a fix
+about evidence reaching further back.
+
+**The second attempt proved nothing either way.** With the gate added, it waited
+until the owner's signature was visible and asked immediately — but only eight
+of twelve transfers had landed, so the legacy page still showed the signature
+and the *rejected* probe would also have answered `ALIVE`. Two probes agreeing
+is not a demonstration that they differ.
+
+Both fixes were to the *script*. It now gates on **both** halves of the premise —
+the signature indexed, and the legacy window actually buried — floods with 20
+transfers rather than 12 so the margin over a ten-item page is comfortable, and
+**aborts without claiming** if the premise never becomes observable. A
+demonstration that cannot see its own premise has nothing to demonstrate, and
+guessing in that state is precisely the habit this whole rejection was about.

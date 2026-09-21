@@ -367,39 +367,64 @@ class _Response:
 
 
 class _Web:
+    """Two independent lanes, because `_probe` now has two sources.
+
+    A probe asks `/api/v2/...?filter=from` first and falls back to the legacy
+    `txlist` page only if v2 returned nothing readable. Routing on the URL is
+    what lets a test say "v2 is down but legacy answers", or "v2 answers but
+    ignores its own filter" - which are the two failure modes the fix exists
+    for, and neither is expressible with one sticky response.
+
+    An UNCONFIGURED v2 lane answers 404, so every legacy-only fixture in this
+    suite exercises the fallback path without being rewritten. It also means a
+    test that means to exercise the PRIMARY path has to say so, which is the
+    right way round: the primary path should never be reached by accident."""
+
     def __init__(self):
         self.reset()
 
     def reset(self):
-        self.sticky = None
-        self.queue = []
+        self.sticky = {"v2": None, "legacy": None}
+        self.queue = {"v2": [], "legacy": []}
         self.log = []
         self.raise_next = 0
         self.calls = 0
 
-    def serve(self, status, body):
-        """Every fetch from now on answers this."""
-        self.sticky = (status, body)
-        self.queue = []
+    @staticmethod
+    def lane_of(url):
+        return "v2" if "/api/v2/" in url else "legacy"
 
-    def script(self, *pairs):
-        """The next fetches answer these, in order; then the sticky value."""
-        self.queue = list(pairs)
+    def serve(self, status, body, lane="legacy"):
+        """Every fetch on this lane from now on answers this."""
+        self.sticky[lane] = (status, body)
+        self.queue[lane] = []
+
+    def script(self, *pairs, lane="legacy"):
+        """The next fetches on this lane answer these, in order; then sticky."""
+        self.queue[lane] = list(pairs)
 
     def fail(self, times=1):
+        """The next `times` fetches raise, whichever lane they are on."""
         self.raise_next = times
 
+    def probes(self):
+        """How many PROBES were made - one v2 attempt opens each one."""
+        return len([u for u in self.log if self.lane_of(u) == "v2"])
+
     def _next(self, url):
+        lane = self.lane_of(url)
         self.calls += 1
         self.log.append(url)
         if self.raise_next > 0:
             self.raise_next -= 1
             raise RuntimeError("connection reset")
-        if self.queue:
-            return self.queue.pop(0)
-        if self.sticky is None:
+        if self.queue[lane]:
+            return self.queue[lane].pop(0)
+        if self.sticky[lane] is None:
+            if lane == "v2":
+                return (404, "")
             raise AssertionError("web fetch with no queued response: " + url)
-        return self.sticky
+        return self.sticky[lane]
 
 
 WEB = _Web()
@@ -673,31 +698,109 @@ def tx(ts: int, sender, to=None, h=None) -> dict:
     }
 
 
+def v2_tx(ts: int, sender, to=None, h=None) -> dict:
+    """One transaction as the V2 endpoint spells it. Field names and types
+    copied from a live 2026-09-21 response, not invented: `timestamp` is an
+    ISO-8601 instant with fractional seconds and `from` is an OBJECT carrying
+    the signer under `hash`, not a flat string. A probe that read only the
+    legacy spelling would see no signer on any of these, count zero signatures,
+    and report a living owner as dormant - so the difference matters and is
+    modelled rather than smoothed over."""
+    return {
+        "hash": h or ("0x" + format(abs(hash((ts, str(sender)))) %
+                                    (16 ** 64), "064x")),
+        "timestamp": iso(int(ts))[:-1] + ".000000Z",
+        "from": {"hash": str(sender)},
+        "to": {"hash": str(to) if to is not None else str(OWNER)},
+        "value": "1000000000000000",
+        "status": "ok",
+        "result": "success",
+    }
+
+
 def txlist(items, status="1", message="OK") -> str:
     return json.dumps({"status": status, "message": message,
                        "result": [x for x in items]})
+
+
+def v2list(items, npp=None) -> str:
+    return json.dumps({"items": [x for x in items], "next_page_params": npp})
 
 
 NO_TX_BODY = json.dumps({"status": "0", "message": "No transactions found",
                          "result": []})
 REFUSED_BODY = json.dumps({"status": "0", "message": "Invalid address format",
                            "result": None})
+V2_EMPTY_BODY = json.dumps({"items": [], "next_page_params": None})
+V2_REFUSED_BODY = json.dumps({"errors": [{
+    "title": "Invalid value", "source": {"pointer": "/address_hash_param"},
+    "detail": "Invalid format. Expected ~r/^0x([A-Fa-f0-9]{40})$/"}]})
 
 
-def serve_txs(items):
-    WEB.serve(200, txlist(items))
+def _outbound(items, wallet):
+    """The subset of a legacy page that `wallet` actually signed - what an
+    explorer HONOURING `filter=from` would have returned."""
+    me = str(wallet).lower()
+    return [i for i in items if str(i.get("from", "")).lower() == me]
+
+
+def _as_v2(items, page):
+    """`items` in v2 spelling, truncated to ONE PAGE.
+
+    The truncation is the whole point of these fixtures and is not a detail. A
+    real explorer answers with a page, not with a history: v2's page is fixed
+    at 50 and the legacy page is whatever `offset` asked for. A fixture that
+    handed the probe every transaction it invented would be a fixture in which
+    the bug under test cannot occur, because nothing ever falls off the end."""
+    return v2list([v2_tx(int(i["timeStamp"]), i["from"], i.get("to"))
+                   for i in items[:page]])
+
+
+def serve_txs(items, wallet=None, page=None):
+    """A CORRECTLY BEHAVING explorer.
+
+    v2 honours `filter=from` and returns only what the wallet signed; the
+    legacy page returns everything, inbound and outbound together, exactly as
+    the live endpoints do. This is the default fixture because it is the
+    default reality."""
+    who = ALICE if wallet is None else wallet
+    size = C.TX_WINDOW if page is None else page
+    WEB.serve(200, _as_v2(_outbound(items, who), size), lane="v2")
+    WEB.serve(200, txlist(items[:size]), lane="legacy")
+
+
+def serve_unfiltered(items, page=None):
+    """An explorer that ACCEPTS `filter=from` AND SILENTLY IGNORES IT.
+
+    Not hypothetical: MEASURED 2026-09-21, the legacy endpoint does exactly
+    this with its own `filterby=from`, returning a byte-identical unfiltered
+    page and HTTP 200. If a v2 host ever behaves the same way, the probe must
+    notice - by checking the signer of every item it was handed - and must not
+    quietly fall back to the bug this fixture stages."""
+    size = C.TX_WINDOW if page is None else page
+    WEB.serve(200, _as_v2(items, size), lane="v2")
+    WEB.serve(200, txlist(items[:size]), lane="legacy")
+
+
+def serve_v2(items):
+    """v2 answers with exactly these v2-shaped items; legacy is not configured
+    and must not be reached."""
+    WEB.serve(200, v2list(items), lane="v2")
 
 
 def serve_empty():
-    WEB.serve(200, NO_TX_BODY)
+    WEB.serve(200, V2_EMPTY_BODY, lane="v2")
+    WEB.serve(200, NO_TX_BODY, lane="legacy")
 
 
 def serve_refused():
-    WEB.serve(200, REFUSED_BODY)
+    WEB.serve(422, V2_REFUSED_BODY, lane="v2")
+    WEB.serve(200, REFUSED_BODY, lane="legacy")
 
 
 def serve_down(status=500):
-    WEB.serve(status, "")
+    WEB.serve(status, "", lane="v2")
+    WEB.serve(status, "", lane="legacy")
 
 
 class Base(unittest.TestCase):
@@ -1226,9 +1329,20 @@ class TestProbe(Base):
             self.assertFalse(vector["src_ok"])
 
     def test_network_exception_is_inconclusive(self):
-        WEB.serve(200, NO_TX_BODY)
-        WEB.fail(1)
+        """BOTH sources have to die. One transport failure is survivable now,
+        and the next test is the proof that it is survived rather than
+        swallowed."""
+        serve_empty()
+        WEB.fail(2)
         self.assertEqual(self.probe()["activity_status"], C.A_INCONCLUSIVE)
+
+    def test_a_dead_primary_falls_back_to_the_legacy_page(self):
+        serve_empty()
+        WEB.fail(1)
+        vector = self.probe()
+        self.assertEqual(vector["activity_status"], C.A_INACTIVE)
+        self.assertTrue(vector["src_ok"])
+        self.assertTrue(vector["cov_ok"])
 
     def test_unparseable_body_is_inconclusive(self):
         WEB.serve(200, "<html>oops</html>")
@@ -1319,13 +1433,13 @@ class TestProbe(Base):
             self.assertGreaterEqual(vector["count_bucket"], 0)
             self.assertLessEqual(vector["count_bucket"], C.TOP_BUCKET)
 
-    def test_probe_returns_only_the_four_vector_fields(self):
+    def test_probe_returns_only_the_five_vector_fields(self):
         """RULE 1's corollary: the probe must not smuggle a field into storage
         that the validators never compared."""
         serve_empty()
         self.assertEqual(set(self.probe().keys()),
                          {"activity_status", "age_bucket", "count_bucket",
-                          "src_ok"})
+                          "src_ok", "cov_ok"})
 
     def test_verdict_is_one_of_three(self):
         for setup in (serve_empty, serve_refused,
@@ -1340,16 +1454,380 @@ class TestProbe(Base):
         self.assertEqual(vector["activity_status"], C.A_ALIVE)
         self.assertGreater(vector["count_bucket"], 0)
 
-    def test_window_is_passed_to_the_url(self):
-        serve_empty()
+    def test_window_is_passed_to_the_fallback_url(self):
+        WEB.serve(404, "", lane="v2")
+        WEB.serve(200, NO_TX_BODY, lane="legacy")
         C._probe(1, "ethereum", str(ALICE), NOW, NOW, 10)
         self.assertIn("offset=10", WEB.log[-1])
+
+    def test_the_primary_url_asks_for_outbound_only(self):
+        """The whole fix, at the URL. A probe that stopped sending this would
+        be back to filtering a mixed page client-side."""
+        serve_empty()
+        self.probe()
+        first = WEB.log[0]
+        self.assertIn("/api/v2/addresses/", first)
+        self.assertIn("/transactions?filter=from", first)
+        self.assertIn(str(ALICE).lower(), first)
 
     def test_probe_does_not_call_a_model(self):
         """`_exec_prompt` in this harness raises on sight. A probe that reached
         for a model would fail here rather than on chain."""
         serve_empty()
         self.probe()
+
+
+# ===========================================================================
+# 3b. THE INBOUND FLOOD - the bug that got this contract rejected
+#
+# REVIEWER, verbatim: "The current probe fetches only the newest ten account
+# transactions and then filters by sender, so newer inbound transfers can hide
+# an owner-signed transaction made after the heartbeat and incorrectly release
+# the estate. Use authoritative outbound-only history or paginate until the
+# heartbeat boundary is covered; if bounded evidence cannot prove that
+# coverage, return INCONCLUSIVE rather than releasing funds."
+#
+# Every test below is that sentence, executed. The attack costs an attacker ten
+# dust transfers and it also happens BY ACCIDENT to any wallet that receives
+# more traffic than it sends - which is most wallets, and certainly most
+# wallets holding an estate.
+# ===========================================================================
+
+
+class TestInboundFlood(Base):
+    """The staged attack, at three levels: the old algorithm, the new probe,
+    and the whole claim path with money on the table."""
+
+    ANCHOR = NOW - 10 * DAY
+
+    def flood(self, inbound=10, signed_at=None):
+        """The reviewer's scenario, as a legacy page: the owner signs once
+        AFTER their last heartbeat, and is then buried under inbound transfers
+        that are all NEWER than their own signature.
+
+        Newest-first, exactly as the explorer sorts it."""
+        when = self.ANCHOR + DAY if signed_at is None else signed_at
+        items = [tx(NOW - i * 60, STRANGER, to=ALICE) for i in range(inbound)]
+        items.append(tx(when, ALICE))
+        items.sort(key=lambda i: -int(i["timeStamp"]))
+        return items
+
+    def probe(self, window=None):
+        return C._probe(1, "ethereum", str(ALICE), self.ANCHOR, NOW,
+                        C.TX_WINDOW if window is None else window)
+
+    # --- the bug itself, so that the fix has something to be a fix OF -------
+
+    def test_the_old_algorithm_would_have_released_the_estate(self):
+        """THE REGRESSION ORACLE. This reimplements the rejected probe in four
+        lines - take the newest `window` transactions of the account, keep the
+        ones this wallet signed, ask whether any is newer than the anchor - and
+        asserts that it gets the WRONG answer on this input.
+
+        It is here so that the test suite states the bug rather than only the
+        behaviour that replaced it. If someone ever reverts the probe to
+        client-side filtering, every other test in this class fails and this
+        one keeps passing, which is exactly the signature to look for."""
+        page = self.flood(inbound=10)[:10]
+        signed = [int(i["timeStamp"]) for i in page
+                  if str(i["from"]).lower() == str(ALICE).lower()]
+        old_verdict = C.A_ALIVE if any(t > self.ANCHOR for t in signed) \
+            else C.A_INACTIVE
+        self.assertEqual(old_verdict, C.A_INACTIVE)
+        self.assertEqual(signed, [], "the owner's own signature is off the page")
+
+    def test_the_reviewers_exact_scenario_at_the_old_window(self):
+        """THE REJECTION, STAGED VERBATIM: ten inbound transfers after one
+        outbound, on a page of ten, against a host whose outbound filter does
+        nothing. The old probe answered INACTIVE here and released the estate.
+
+        The window is pinned to ten rather than to TX_WINDOW because the point
+        is that the fix does not depend on the window. Fifty would only move
+        the number of dust transfers an attacker has to send."""
+        serve_unfiltered(self.flood(inbound=10), page=10)
+        vector = self.probe(window=10)
+        self.assertEqual(vector["activity_status"], C.A_INCONCLUSIVE)
+        self.assertNotEqual(vector["activity_status"], C.A_INACTIVE)
+        self.assertTrue(vector["src_ok"])
+        self.assertFalse(vector["cov_ok"])
+
+    def test_the_reviewers_exact_scenario_with_the_filter_working(self):
+        """And with the filter doing its job, the same input answers ALIVE -
+        which is the truth. INCONCLUSIVE is the safe answer, not the good one;
+        the good one comes from asking the right endpoint."""
+        serve_txs(self.flood(inbound=10), page=10)
+        self.assertEqual(self.probe(window=10)["activity_status"], C.A_ALIVE)
+
+    def test_the_owner_really_did_sign_after_the_heartbeat(self):
+        """The premise of the whole class: on this input the truth is ALIVE."""
+        items = self.flood(inbound=10)
+        mine = [int(i["timeStamp"]) for i in items
+                if str(i["from"]).lower() == str(ALICE).lower()]
+        self.assertEqual(len(mine), 1)
+        self.assertGreater(mine[0], self.ANCHOR)
+
+    # --- the fix, against an explorer that honours the filter ---------------
+
+    def test_outbound_only_history_reads_alive_through_the_flood(self):
+        """THE FIX. `filter=from` returns the owner's signature no matter how
+        much inbound traffic is stacked on top of it."""
+        serve_txs(self.flood(inbound=10))
+        self.assertEqual(self.probe()["activity_status"], C.A_ALIVE)
+
+    def test_it_survives_a_flood_far_larger_than_any_page(self):
+        """Fifty inbound transfers - a full v2 page and a full legacy page -
+        and the verdict does not move. The fix is not a bigger window."""
+        serve_txs(self.flood(inbound=50))
+        self.assertEqual(self.probe()["activity_status"], C.A_ALIVE)
+
+    def test_two_hundred_inbound_transfers_change_nothing(self):
+        serve_txs(self.flood(inbound=200))
+        vector = self.probe()
+        self.assertEqual(vector["activity_status"], C.A_ALIVE)
+        self.assertTrue(vector["cov_ok"])
+
+    def test_the_estate_is_not_released_end_to_end(self):
+        """The same attack with money on the table. Nothing moves."""
+        c = self.make()
+        wid = self.make_will(c, days=1, deposit=10 * GEN)
+        set_now(NOW + 3 * DAY)
+        anchor = int(c.wills[wid - 1].last_heartbeat)
+        items = [tx(NOW + 3 * DAY - i * 60, STRANGER, to=ALICE)
+                 for i in range(10)]
+        items.append(tx(anchor + 60, ALICE))
+        items.sort(key=lambda i: -int(i["timeStamp"]))
+        serve_txs(items)
+        out = self.call(c, FINDER, "claim_inactive", wid)
+        self.assertEqual(out["status"], "OK")
+        self.assertEqual(out["outcome"], C.A_ALIVE)
+        self.assertFalse(out["released"])
+        self.assertEqual(int(c.locked_wei), 10 * GEN)
+        self.assertEqual(self.owed(c, BOB), 0)
+        self.assertEqual(self.owed(c, FINDER), 0)
+        self.ledger(c)
+
+    # --- the fix, against an explorer that IGNORES the filter ---------------
+
+    def test_an_ignored_filter_is_inconclusive_never_inactive(self):
+        """THE SECOND HALF OF THE REVIEWER'S INSTRUCTION. Suppose a host
+        accepts `filter=from` and silently returns an unfiltered page anyway -
+        which the LEGACY endpoint measurably does with `filterby`. The probe
+        must notice that the page is mixed, find that it does not reach the
+        anchor, and refuse to answer. INCONCLUSIVE changes nothing and anyone
+        may retry; INACTIVE would pay out a living owner's estate."""
+        serve_unfiltered(self.flood(inbound=C.TX_WINDOW + 20))
+        vector = self.probe()
+        self.assertEqual(vector["activity_status"], C.A_INCONCLUSIVE)
+        self.assertNotEqual(vector["activity_status"], C.A_INACTIVE)
+
+    def test_an_ignored_filter_still_reports_the_source_as_alive_and_well(self):
+        """`src_ok` stays TRUE: the explorer answered, it just did not answer
+        far enough back. That distinction is what tells an operator reading the
+        stored evidence whether the explorer is down or the wallet is busy, and
+        it is on the consensus axis so no leader invents it."""
+        serve_unfiltered(self.flood(inbound=C.TX_WINDOW + 20))
+        vector = self.probe()
+        self.assertTrue(vector["src_ok"])
+        self.assertFalse(vector["cov_ok"])
+
+    def test_an_ignored_filter_over_a_page_that_reaches_the_anchor_answers(self):
+        """The mixed page is not useless - only unproven. When it reaches back
+        past the anchor it contains every transaction after the anchor by
+        construction, so it can answer, and here it correctly answers ALIVE."""
+        items = self.flood(inbound=4)
+        items.append(tx(self.ANCHOR - 5 * DAY, STRANGER, to=ALICE))
+        items.sort(key=lambda i: -int(i["timeStamp"]))
+        serve_unfiltered(items)
+        self.assertEqual(self.probe()["activity_status"], C.A_ALIVE)
+
+    def test_a_dormant_wallet_under_an_ignored_filter_can_still_settle(self):
+        """A mixed page that spans the anchor and contains no signature after
+        it IS proof of dormancy, and must still release. Refusing every mixed
+        page would hand any stranger a permanent veto over every will."""
+        items = [tx(self.ANCHOR - DAY - i * HOUR, STRANGER, to=ALICE)
+                 for i in range(3)]
+        serve_unfiltered(items)
+        vector = self.probe()
+        self.assertEqual(vector["activity_status"], C.A_INACTIVE)
+        self.assertTrue(vector["cov_ok"])
+
+    def test_the_estate_is_not_released_under_an_ignored_filter(self):
+        c = self.make()
+        wid = self.make_will(c, days=1, deposit=10 * GEN)
+        set_now(NOW + 3 * DAY)
+        anchor = int(c.wills[wid - 1].last_heartbeat)
+        items = [tx(NOW + 3 * DAY - i * 60, STRANGER, to=ALICE)
+                 for i in range(C.TX_WINDOW + 20)]
+        items.append(tx(anchor + 60, ALICE))
+        items.sort(key=lambda i: -int(i["timeStamp"]))
+        serve_unfiltered(items)
+        out = self.call(c, FINDER, "claim_inactive", wid)
+        self.assertEqual(out["outcome"], C.A_INCONCLUSIVE)
+        self.assertFalse(out["released"])
+        self.assertEqual(int(c.locked_wei), 10 * GEN)
+        self.ledger(c)
+
+    # --- and the griefing vector rule 9 closed must stay closed -------------
+
+    def test_an_inbound_flood_cannot_block_a_genuinely_dormant_wallet(self):
+        """RULE 9, still standing. The owner has signed NOTHING since the
+        anchor; a stranger floods the account with inbound transfers hoping to
+        keep the will locked. On the outbound-only page the flood is invisible
+        and the will settles. An attacker who could force INCONCLUSIVE for ever
+        would have a free veto over every inheritance on this contract."""
+        serve_txs([tx(NOW - i * 60, STRANGER, to=ALICE) for i in range(80)])
+        vector = self.probe()
+        self.assertEqual(vector["activity_status"], C.A_INACTIVE)
+        self.assertEqual(vector["count_bucket"], 0)
+        self.assertTrue(vector["cov_ok"])
+
+    def test_the_flood_does_not_move_the_age_bucket(self):
+        serve_txs(self.flood(inbound=50, signed_at=self.ANCHOR - 100 * DAY))
+        vector = self.probe()
+        self.assertEqual(vector["activity_status"], C.A_INACTIVE)
+        self.assertEqual(vector["age_bucket"], 6)
+
+
+class TestCovers(Base):
+    """`_covers` on its own - the one predicate standing between a page of
+    history and an irreversible payout."""
+
+    def test_a_short_page_is_the_whole_history(self):
+        self.assertTrue(C._covers(9, NOW - DAY, NOW - 10 * DAY, 10))
+
+    def test_an_empty_page_is_covered(self):
+        self.assertTrue(C._covers(0, 0, NOW, 10))
+
+    def test_a_full_page_reaching_past_the_anchor_is_covered(self):
+        self.assertTrue(C._covers(10, NOW - 20 * DAY, NOW - 10 * DAY, 10))
+
+    def test_a_full_page_ending_exactly_on_the_anchor_is_covered(self):
+        """The anchor itself is inside the page, so nothing after it is
+        missing. The boundary is inclusive in the direction that does NOT
+        release money on a guess."""
+        self.assertTrue(C._covers(10, NOW - 10 * DAY, NOW - 10 * DAY, 10))
+
+    def test_a_full_page_that_stops_short_of_the_anchor_is_not_covered(self):
+        """THE ATTACK, reduced to one line."""
+        self.assertFalse(C._covers(10, NOW - DAY, NOW - 10 * DAY, 10))
+
+    def test_a_full_page_with_no_readable_timestamp_is_not_covered(self):
+        self.assertFalse(C._covers(10, 0, NOW - 10 * DAY, 10))
+
+    def test_an_overfull_page_is_still_judged_on_reach(self):
+        self.assertFalse(C._covers(11, NOW - DAY, NOW - 10 * DAY, 10))
+        self.assertTrue(C._covers(11, NOW - 20 * DAY, NOW - 10 * DAY, 10))
+
+
+class TestWindowMatchesThePage(Base):
+    """TX_WINDOW is load-bearing in a way a plain constant is not, and this is
+    the class that says so."""
+
+    def test_the_window_is_the_v2_page_size(self):
+        """v2 returns a FIXED page of 50 and takes no size parameter. If
+        TX_WINDOW were larger, a full 50-item v2 page would read as SHORT -
+        `len(items) < requested` - and a short page is treated as a complete
+        history. That single mismatch would hand the inbound flood its old
+        result back through the coverage check instead of through the filter.
+        Measured against the live endpoint 2026-09-21."""
+        self.assertEqual(C.TX_WINDOW, 50)
+
+    def test_a_saturated_page_is_never_mistaken_for_a_whole_history(self):
+        self.assertFalse(C._covers(C.TX_WINDOW, NOW, NOW - 10 * DAY,
+                                   C.TX_WINDOW))
+
+
+class TestV2Shape(Base):
+    """The v2 response, parsed. Every field name here was copied off a live
+    response on 2026-09-21; the two endpoints agree about nothing except the
+    facts."""
+
+    def test_items_list_is_readable(self):
+        readable, items = C._parse_v2(v2list([v2_tx(NOW, ALICE)]))
+        self.assertTrue(readable)
+        self.assertEqual(len(items), 1)
+
+    def test_an_empty_items_list_is_a_real_answer(self):
+        """`{"items":[]}` from a valid, never-used address. This is the body
+        that releases money, so it must be readable and it must be empty."""
+        readable, items = C._parse_v2(V2_EMPTY_BODY)
+        self.assertTrue(readable)
+        self.assertEqual(items, [])
+
+    def test_an_error_body_is_not_readable(self):
+        """HTTP 422 with an `errors` key and NO `items` key - what the live
+        endpoint answers for a malformed address. The legacy endpoint's
+        equivalent trap was `result: null`; this is the same trap with a
+        different spelling, and it must fail the same way."""
+        self.assertFalse(C._parse_v2(V2_REFUSED_BODY)[0])
+
+    def test_items_null_is_not_readable(self):
+        self.assertFalse(C._parse_v2('{"items":null}')[0])
+
+    def test_items_missing_is_not_readable(self):
+        self.assertFalse(C._parse_v2('{"next_page_params":null}')[0])
+
+    def test_items_as_a_string_is_not_readable(self):
+        self.assertFalse(C._parse_v2('{"items":"none"}')[0])
+
+    def test_a_legacy_body_is_not_a_v2_body(self):
+        """Feeding one parser the other's body must fail cleanly rather than
+        half-succeed - that is what makes the fallback in `_probe` safe."""
+        self.assertFalse(C._parse_v2(NO_TX_BODY)[0])
+        self.assertFalse(C._parse(V2_EMPTY_BODY)[0])
+
+    def test_the_nested_signer_is_read(self):
+        self.assertEqual(C._tx_from(v2_tx(NOW, ALICE)), str(ALICE).lower())
+
+    def test_the_iso_timestamp_is_read(self):
+        self.assertEqual(C._tx_time(v2_tx(NOW, ALICE)), NOW)
+
+    def test_fractional_seconds_do_not_confuse_the_clock(self):
+        item = dict(v2_tx(NOW, ALICE))
+        item["timestamp"] = "2026-09-18T12:00:00.987654Z"
+        self.assertEqual(C._tx_time(item), NOW)
+
+    def test_a_signer_object_without_a_hash_is_no_signer(self):
+        item = dict(v2_tx(NOW, ALICE))
+        item["from"] = {}
+        self.assertEqual(C._tx_from(item), "")
+
+    def test_a_signer_that_is_neither_string_nor_object(self):
+        for value in (7, None, [], True):
+            item = dict(v2_tx(NOW, ALICE))
+            item["from"] = value
+            self.assertEqual(C._tx_from(item), "")
+
+    def test_an_unreadable_signer_cannot_manufacture_a_verdict(self):
+        """An item whose signer cannot be read is not a signature, and a full
+        page of them does not reach the anchor - so the honest answer is
+        INCONCLUSIVE rather than a dormancy reading built out of junk."""
+        serve_v2([{"timestamp": iso(NOW - HOUR) + "", "from": None}
+                  for _ in range(C.TX_WINDOW)])
+        vector = C._probe(1, "ethereum", str(ALICE), NOW - 10 * DAY, NOW,
+                          C.TX_WINDOW)
+        self.assertEqual(vector["activity_status"], C.A_INCONCLUSIVE)
+
+    def test_the_primary_is_preferred_and_the_fallback_is_not_fetched(self):
+        """A readable v2 page ends the probe. Asking twice for the same facts
+        doubles the rate-limit pressure on an endpoint that starts answering
+        429 at the third rapid request."""
+        serve_v2([v2_tx(NOW - HOUR, ALICE)])
+        C._probe(1, "ethereum", str(ALICE), NOW - 10 * DAY, NOW, C.TX_WINDOW)
+        self.assertEqual(len(WEB.log), 1)
+        self.assertIn("/api/v2/", WEB.log[0])
+
+    def test_at_most_two_fetches_per_probe(self):
+        """No pagination loop. A round fires one probe per validator at once
+        from one datacentre range; a five-page walk would rate-limit itself
+        into a permanent INCONCLUSIVE."""
+        for setup in (serve_empty, serve_refused, serve_down,
+                      lambda: serve_txs([tx(NOW - HOUR, ALICE)])):
+            WEB.reset()
+            setup()
+            C._probe(1, "ethereum", str(ALICE), NOW - 10 * DAY, NOW,
+                     C.TX_WINDOW)
+            self.assertLessEqual(len(WEB.log), 2, str(WEB.log))
 
 
 # ===========================================================================
@@ -1360,7 +1838,7 @@ class TestProbe(Base):
 class TestCanon(Base):
     def vec(self, **kw):
         base = {"activity_status": C.A_INACTIVE, "age_bucket": 7,
-                "count_bucket": 0, "src_ok": True}
+                "count_bucket": 0, "src_ok": True, "cov_ok": True}
         base.update(kw)
         return base
 
@@ -1449,7 +1927,7 @@ class TestCanon(Base):
         """Two different projections must not canonicalise to one string."""
         canon = self.canon()
         parts = canon.split("|")
-        self.assertEqual(len(parts), 11)
+        self.assertEqual(len(parts), 12)
 
 
 # ===========================================================================
@@ -1460,7 +1938,7 @@ class TestCanon(Base):
 class TestCoherent(Base):
     def good(self, **kw):
         vector = {"activity_status": C.A_INACTIVE, "age_bucket": 7,
-                  "count_bucket": 0, "src_ok": True}
+                  "count_bucket": 0, "src_ok": True, "cov_ok": True}
         vector.update(kw)
         return C._seal(1, "ethereum", str(ALICE), NOW - DAY, NOW, 10, vector)
 
@@ -1475,7 +1953,7 @@ class TestCoherent(Base):
     def test_inconclusive_payload_passes(self):
         self.assertTrue(C._coherent(
             self.good(activity_status=C.A_INCONCLUSIVE, age_bucket=7,
-                      count_bucket=0, src_ok=False)))
+                      count_bucket=0, src_ok=False, cov_ok=False)))
 
     def test_not_a_dict(self):
         for value in (None, "x", 7, [], True):
@@ -1504,6 +1982,56 @@ class TestCoherent(Base):
         payload = self.good()
         del payload["src_ok"]
         self.assertFalse(C._coherent(payload))
+
+    def test_cov_ok_wrong_type(self):
+        self.assertFalse(C._coherent(self.good(cov_ok=1)))
+
+    def test_cov_ok_missing(self):
+        payload = self.good()
+        del payload["cov_ok"]
+        self.assertFalse(C._coherent(payload))
+
+    def test_an_uncovered_inactive_verdict_is_refused(self):
+        """THE FORGERY THIS FIELD EXISTS TO STOP, and the one the reviewer
+        found. A leader that read a page which never reached the heartbeat
+        anchor, and reported INACTIVE anyway, is claiming to have proved a
+        negative from evidence that cannot contain it. Every validator refuses
+        it on the payload alone, before spending a fetch."""
+        self.assertFalse(C._coherent(
+            self.good(activity_status=C.A_INACTIVE, cov_ok=False)))
+
+    def test_an_uncovered_alive_verdict_is_refused(self):
+        self.assertFalse(C._coherent(
+            self.good(activity_status=C.A_ALIVE, count_bucket=2,
+                      cov_ok=False)))
+
+    def test_uncovered_must_be_inconclusive(self):
+        payload = self.good(activity_status=C.A_INCONCLUSIVE, age_bucket=7,
+                            count_bucket=0, src_ok=True, cov_ok=False)
+        self.assertTrue(C._coherent(payload))
+
+    def test_no_signature_cannot_have_a_datable_age(self):
+        """`count_bucket = 0` means no signature was found at all, so there is
+        nothing whose age could be anything but AGE_NEVER. Allowing the pair
+        would let a stored sentence say "no signature was found at all" and
+        "the newest signature is less than a day old" in one breath."""
+        for rung in range(0, C.TOP_BUCKET):
+            self.assertFalse(C._coherent(
+                self.good(activity_status=C.A_INACTIVE, count_bucket=0,
+                          age_bucket=rung)), "age_bucket " + str(rung))
+
+    def test_no_signature_with_age_never_is_fine(self):
+        self.assertTrue(C._coherent(
+            self.good(activity_status=C.A_INACTIVE, count_bucket=0,
+                      age_bucket=C.AGE_NEVER)))
+
+    def test_a_dead_source_cannot_have_proved_coverage(self):
+        """`src_ok=False, cov_ok=True` is unreachable from any honest probe.
+        Leaving it spellable would leave two ways to say "no verdict" and one
+        of them a place for a wrong assumption to grow."""
+        self.assertFalse(C._coherent(
+            self.good(activity_status=C.A_INCONCLUSIVE, age_bucket=7,
+                      count_bucket=0, src_ok=False, cov_ok=True)))
 
     def test_age_bucket_as_bool(self):
         """`True` is an int of value 1 in Python. Without the explicit bool
@@ -1610,11 +2138,12 @@ class TestCoherent(Base):
             "age_bucket": ("age_bucket",),
             "count_bucket": ("count_bucket",),
             "src_ok": ("src_ok", "dead_source"),
+            "cov_ok": ("cov_ok", "uncovered"),
             "content_hash": ("hash",),
         }
         self.assertEqual(set(fragments),
                          {"activity_status", "age_bucket", "count_bucket",
-                          "src_ok", "content_hash"})
+                          "src_ok", "cov_ok", "content_hash"})
         for field, tokens in fragments.items():
             self.assertTrue(any(t in blob for t in tokens),
                             "no forgery test covers " + field)
@@ -1623,7 +2152,7 @@ class TestCoherent(Base):
 class TestAgrees(Base):
     def vec(self, **kw):
         base = {"activity_status": C.A_INACTIVE, "age_bucket": 7,
-                "count_bucket": 0, "src_ok": True,
+                "count_bucket": 0, "src_ok": True, "cov_ok": True,
                 "content_hash": "0123456789abcdef"}
         base.update(kw)
         return base
@@ -1757,7 +2286,7 @@ class TestSplit(Base):
 class TestReason(Base):
     def vec(self, **kw):
         base = {"activity_status": C.A_INACTIVE, "age_bucket": 7,
-                "count_bucket": 0, "src_ok": True}
+                "count_bucket": 0, "src_ok": True, "cov_ok": True}
         base.update(kw)
         return base
 
@@ -1787,7 +2316,22 @@ class TestReason(Base):
 
     def test_inactive_mentions_signatures_only(self):
         text = C._reason(self.vec(), "ethereum", 10)
-        self.assertIn("Inbound transfers were ignored", text)
+        self.assertIn("Only transactions this wallet SIGNED were counted",
+                      text)
+        self.assertIn("neither prove life nor hide it", text)
+
+    def test_inactive_says_the_history_covered_the_question(self):
+        """A release must state the thing that makes it safe, in the sentence
+        anybody reads years later — and it must stay true for BOTH ways
+        coverage is proved, since the vector cannot tell them apart. A page
+        that reaches back past the anchor covers the period since the
+        check-in; so does a short page that is the wallet's entire history,
+        including a wallet that has never sent anything at all."""
+        self.assertIn("covering the whole period since that check-in",
+                      C._reason(self.vec(), "ethereum", 50))
+        self.assertNotIn("reaches back past",
+                         C._reason(self.vec(age_bucket=7, count_bucket=0),
+                                   "ethereum", 50))
 
     def test_alive_says_the_deposit_stays(self):
         text = C._reason(self.vec(activity_status=C.A_ALIVE, count_bucket=2),
@@ -2679,8 +3223,11 @@ class TestConsensusBinding(ClaimBase):
         fetch that dies becomes INCONCLUSIVE rather than an exception. That is
         rule 8, and this is the end-to-end proof of it."""
         c, wid = self.overdue_will()
-        WEB.serve(200, NO_TX_BODY)
-        WEB.fail(2)
+        serve_empty()
+        # Two sources per probe and two probes per round: the leader's v2 and
+        # legacy fetches, then the validator's. A round only reaches
+        # INCONCLUSIVE when every one of them is dead.
+        WEB.fail(4)
         out = self.call(c, FINDER, "claim_inactive", wid)
         self.assertEqual(out["outcome"], C.A_INCONCLUSIVE)
         self.assertEqual(int(c.locked_wei), 10 * GEN)
@@ -3232,7 +3779,16 @@ class TestViews(Base):
         cfg = self.view(c, "get_config")
         self.assertEqual(cfg["consensus"]["compared_fields"],
                          ["activity_status", "age_bucket", "count_bucket",
-                          "src_ok", "content_hash"])
+                          "src_ok", "cov_ok", "content_hash"])
+
+    def test_get_config_declares_the_outbound_source(self):
+        """What the contract SAYS about its own evidence must match what it
+        does, because `tools/audit_chain.mjs` asserts this against the deployed
+        bytes and a reader has nothing else to go on."""
+        cfg = self.view(self.make(), "get_config")["consensus"]
+        self.assertIn("filter=from", cfg["outbound_source"])
+        self.assertTrue(cfg["coverage_required_for_release"])
+        self.assertEqual(cfg["max_fetches_per_probe"], 2)
 
     def test_get_config_declares_no_model(self):
         c = self.make()
@@ -3871,7 +4427,7 @@ class TestStructIsFullyBound(Base):
     }
     FROM_VECTOR = {
         "last_verdict", "last_age_bucket", "last_count_bucket", "last_src_ok",
-        "last_content_hash",
+        "last_cov_ok", "last_content_hash",
     }
     DERIVED = {"last_reason"}
 
@@ -3882,15 +4438,17 @@ class TestStructIsFullyBound(Base):
 
     def test_the_compared_axis_covers_the_vector_fields(self):
         compared = {"activity_status", "age_bucket", "count_bucket", "src_ok",
-                    "content_hash"}
+                    "cov_ok", "content_hash"}
         self.assertEqual(len(self.FROM_VECTOR), len(compared))
 
     def test_the_derived_field_is_a_pure_function(self):
         self.assertEqual(
             C._reason({"activity_status": C.A_INACTIVE, "age_bucket": 7,
-                       "count_bucket": 0, "src_ok": True}, "ethereum", 10),
+                       "count_bucket": 0, "src_ok": True, "cov_ok": True},
+                      "ethereum", 50),
             C._reason({"activity_status": C.A_INACTIVE, "age_bucket": 7,
-                       "count_bucket": 0, "src_ok": True}, "ethereum", 10))
+                       "count_bucket": 0, "src_ok": True, "cov_ok": True},
+                      "ethereum", 50))
 
 
 class TestNoWriteRaises(Base):

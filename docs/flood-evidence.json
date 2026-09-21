@@ -1,0 +1,133 @@
+{
+  "network": "studiodev",
+  "demo": "0xDb7ED7C86412d73D469f4f6F8148E76324fB9518",
+  "watch_chain": "sepolia",
+  "flood_size": 20,
+  "started_at": "2026-09-21T13:01:19.991Z",
+  "steps": [
+    {
+      "step": "create_will",
+      "will_id": 5,
+      "tx": "0x798d0da8be25ad3ee518fe9eada9471ec0b20201c26b2674ff0b459e3d8f5b08",
+      "anchor": 1789995699,
+      "claimable_at": 1789996299,
+      "deposit_wei": "5000000000000000000"
+    },
+    {
+      "step": "owner_signature",
+      "hash": "0x14afcc903d042824a9b8b0373dc8c8bc8018605793adca78acd805aed48f1ef5",
+      "timestamp": 1789995720,
+      "seconds_after_anchor": 21
+    },
+    {
+      "step": "flood",
+      "count": 20,
+      "hashes": [
+        "0x1c17be2f0162e871e5c8f6d39770823365154841c6365d4e48636a50cfb5142c",
+        "0xf6be0e8846cdc3491a3ce95faf5c20360e6b4ddf5a45a8dfd84c35ddc649ba00",
+        "0xd9f0aa480e5901b456bef711cde5ecb9ee6484c7664f2bcaf22a8d40b9fc65ee",
+        "0xe76e0b7f44676b801a4f5127ff62ac6b86f5812c9284c9bf1c9f8d0bbdff91ea",
+        "0xea3fdf5cc480492b27a42fc1cccd1fdc275dceeb388655cc8f3fac0c8d6a317e",
+        "0xbc1c8e3f83078760e034d22c5a197171e18040a01afe731784ba730bc1e37ec9",
+        "0x4adc5ad766e1337d25f575a077b7f67913f44a76239136b1277d26ed5dc793ec",
+        "0xa3ce8efe0405121c90d31112afda60916a682a630da3f1c82e5ec7f1da044dda",
+        "0xae5c26a44cd7b7bdba376bdf2bbd774204f9c749d3e2be033ec4df6face9df04",
+        "0x0e5f80fbd643092b2ced137da3bdfe029c78c622726e794abb4e6ad38e7f4f7e",
+        "0xfcaf6c7372cbd8ac6a68c6d7cd489a70f027f9237a2de08e06e0cba08d284e2a",
+        "0x272240b40f8d9cc47f04eb3c2f4b58db235d25c57fca2716386d63e509ecd290",
+        "0xb07bf9e75844788aa177fdab1592f2963daf6af2941ede8cd7a6061cbd37c474",
+        "0xc636b5223f86017ebce4c2e76c228bbccb6526c74efa5e0b6f85d3bc0ac59b9a",
+        "0xb2309233e6c697a0e08fc9ca111cd66457a43b6098834c11ae2b623cebe2d336",
+        "0xd1ccaaa99dc9e36011e4dcfaad918a0f55d42c07c440ec4e012544f7904a55d3",
+        "0x5e630fbc8a785cdb5968c6cdb3e594031d8f9d6096e9008190a59fa692ea4a3d",
+        "0x56e3e122c878c06c3707c68c504f3a5188a31cb194a36fc3133302e4c640f301",
+        "0xb0772fcb13af5ef7294b9c0d3a2b3788a49f2c449d23f3c7723ea04e60b3936b",
+        "0x5d6e6ce402bb3123ea2089ab5e9bcc766627152622a462669505911ed8696f3c"
+      ],
+      "last_block": 11751068,
+      "last_timestamp": 1789995756
+    },
+    {
+      "step": "indexing",
+      "indexed": true,
+      "newest_signed": 1789995720,
+      "seconds_after_anchor": 21,
+      "buried": true
+    },
+    {
+      "step": "endpoint_comparison",
+      "anchor": 1789995699,
+      "rejected_probe": {
+        "url": "https://eth-sepolia.blockscout.com/api?module=account&action=txlist&address=0xbe9ee23694b69d287fbe096ab3e37f61cff7b802&sort=desc&page=1&offset=10",
+        "readable": true,
+        "page": 10,
+        "signed": 0,
+        "inbound": 10,
+        "since_anchor": 0,
+        "verdict": "INACTIVE"
+      },
+      "deployed_probe": {
+        "url": "https://eth-sepolia.blockscout.com/api/v2/addresses/0xbe9ee23694b69d287fbe096ab3e37f61cff7b802/transactions?filter=from",
+        "readable": true,
+        "page": 11,
+        "signed": 11,
+        "foreign": 0,
+        "since_anchor": 1,
+        "newest": 1789995720,
+        "verdict": "ALIVE"
+      }
+    },
+    {
+      "step": "claim_attempts",
+      "attempts": [
+        {
+          "attempt": 1,
+          "outcome": "ALIVE",
+          "seconds": 12.632,
+          "tx": "0x708b2bc619f7d52f352603c3b51e20399216f2b825a8ab02ad2a6d11b09fe12a",
+          "src_ok": true,
+          "cov_ok": true
+        }
+      ]
+    },
+    {
+      "step": "verdict",
+      "outcome": "ALIVE",
+      "cov_ok": true,
+      "src_ok": true,
+      "will_id": 5,
+      "claim_tx": "0x708b2bc619f7d52f352603c3b51e20399216f2b825a8ab02ad2a6d11b09fe12a",
+      "evidence": {
+        "claim_attempts": 1,
+        "last_claim_at": 1789996316,
+        "reason": "Still alive: this wallet signed at least one transaction AFTER the owner's last heartbeat, according to the sepolia explorer. The newest signature is less than a day old, and eight to fifteen signatures were found in the last 50 transactions examined. Missing a check-in is not the same as being gone, so the deposit stays where it is.",
+        "activity_status": "ALIVE",
+        "age_bucket": 0,
+        "age_meaning": "less than a day old",
+        "count_bucket": 4,
+        "count_meaning": "eight to fifteen signatures were found",
+        "src_ok": true,
+        "cov_ok": true,
+        "content_hash": "f197ba0872ad8c16",
+        "anchor_ts": 1789995699,
+        "checked_at": 1789996316,
+        "window": 50,
+        "chain": "sepolia"
+      },
+      "locked_before": "5000000000000000000",
+      "locked_after": "5000000000000000000",
+      "owed_heir_before": "0",
+      "owed_heir_after": "0",
+      "owed_finder_before": "0",
+      "owed_finder_after": "0",
+      "verify_checks_passed": 3,
+      "released": false
+    },
+    {
+      "step": "done",
+      "failures": 0
+    }
+  ],
+  "finished_at": "2026-09-21T13:12:10.118Z",
+  "failures": 0
+}

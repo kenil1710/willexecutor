@@ -1,8 +1,8 @@
 {
   "network": "studiodev",
-  "started_at": "2026-09-18T17:54:23.788Z",
-  "main": "0xa3eF4Ee2a69b38d20866A80be054c79282b4c03e",
-  "demo": "0x766897eb88F5D7dbb2734A0501fA97eFDb3cd1d0",
+  "started_at": "2026-09-21T12:38:15.727Z",
+  "main": "0x8862e1CcB90529Ff7e17DC80e0A13148d3530d98",
+  "demo": "0xDb7ED7C86412d73D469f4f6F8148E76324fB9518",
   "steps": [
     {
       "step": "create_will",
@@ -13,8 +13,8 @@
       "deposit_wei": "5000000000000000000",
       "status": "OK",
       "will_id": 1,
-      "tx": "0xf0fc4bc5f987c62e47a38622920a02b2ce047d9fd7c22920cb17b9b797267816",
-      "seconds": 7.293
+      "tx": "0x52ae2c9cac6a5166b99e0d71fa26547c6e3d769cae1e5260b2c52aaedd638caf",
+      "seconds": 10.232
     },
     {
       "step": "create_will",
@@ -25,8 +25,8 @@
       "deposit_wei": "12000000000000000000",
       "status": "OK",
       "will_id": 2,
-      "tx": "0x453c4b61a32e72b69669615491849f5cded0d3a87fd4ecf2ab878fe7e121a84f",
-      "seconds": 6.828
+      "tx": "0xfc34e36c5a4f94cc04fe77426e29efb435900dfd4fd9c98bddf54970c6b225fb",
+      "seconds": 34.577
     },
     {
       "step": "create_will",
@@ -37,8 +37,8 @@
       "deposit_wei": "3000000000000000000",
       "status": "OK",
       "will_id": 3,
-      "tx": "0x0136192e659653b020f06da7bca8385d81330d7aae98f1637c144f7c844f97ec",
-      "seconds": 8.972
+      "tx": "0xe546c12b6e059351ae4bae34cbfdf552713760fd7f0262dd3cea3bf11446738d",
+      "seconds": 10.45
     },
     {
       "step": "stats_after_creation",
@@ -83,25 +83,25 @@
     {
       "step": "heartbeat",
       "will_id": 1,
-      "before": 1789754075,
-      "after": 1789754100,
+      "before": 1789994307,
+      "after": 1789994363,
       "heartbeat_count": 1,
-      "tx": "0xe460a1e3d4648e82260307faf379912f168f8100bdd415d8fcb9362a64342b09"
+      "tx": "0x705445391928bd7d744b6164f347e0a77a81d66cf3b909f10f6037875ff2ec4c"
     },
     {
       "step": "premature_claim",
       "will_id": 1,
       "status": "REJECTED",
-      "reason": "will #1 is not overdue; it becomes claimable in 5183990s",
+      "reason": "will #1 is not overdue; it becomes claimable in 5183988s",
       "reverted": false,
-      "tx": "0xaaa2e5965155ad6db18f7e9e7cb5dda20fcfc5597345424cf8cf6a0ebf502c52"
+      "tx": "0x8bebab478221353e64496c5a851721aeb10739af3a05abe0b89645489135fec4"
     },
     {
       "step": "demo_wills_created",
       "will_1": "OK",
       "will_2": "OK",
-      "tx_1": "0x0c3a306fe5ae18ace92e5dd7909f88b99a67060ee52261646d4f83c53389efb4",
-      "tx_2": "0xed0f305d2dba9aaf31417a81b2c966a4a7651956e25e7e9e49ac50fad7b76073"
+      "tx_1": "0xa4f30d2301266f46a4848ac164ed37a9d845c222f38b7cbe1dab6183749a755c",
+      "tx_2": "0xece62761067dc370580ba619242d354eb9b4cf7089fcac61b29e25da0ea1f534"
     },
     {
       "step": "claimable",
@@ -116,15 +116,15 @@
           "deposit_wei": "8000000000000000000",
           "deposit_gen": "8.00",
           "check_in_interval_units": 60,
-          "last_heartbeat": 1789754121,
-          "claimable_at": 1789754241,
+          "last_heartbeat": 1789994386,
+          "claimable_at": 1789994506,
           "seconds_until_claimable": 0,
           "is_claimable": true,
           "claim_in_flight": false,
           "activity_status": "",
           "finder_fee_wei": "400000000000000000",
           "finder_fee_gen": "0.40",
-          "overdue_by_s": 42
+          "overdue_by_s": 41
         },
         {
           "will_id": 2,
@@ -135,15 +135,15 @@
           "deposit_wei": "4000000000000000000",
           "deposit_gen": "4.00",
           "check_in_interval_units": 60,
-          "last_heartbeat": 1789754132,
-          "claimable_at": 1789754252,
+          "last_heartbeat": 1789994397,
+          "claimable_at": 1789994517,
           "seconds_until_claimable": 0,
           "is_claimable": true,
           "claim_in_flight": false,
           "activity_status": "",
           "finder_fee_wei": "200000000000000000",
           "finder_fee_gen": "0.20",
-          "overdue_by_s": 31
+          "overdue_by_s": 30
         }
       ]
     },
@@ -161,10 +161,10 @@
         {
           "attempt": 1,
           "outcome": "INACTIVE",
-          "seconds": 6.371,
-          "tx": "0xf7e6f84a8eacde6cb8765efcac119e1de50084366e78d2ce919d54aec233c5c5",
+          "seconds": 8.213,
+          "tx": "0xc38fce30d976583a192dc5644ee12e758b0c7a849e9f1b83d85e76a867390970",
           "src_ok": true,
-          "content_hash": "43feae0a7f5cd9d5"
+          "content_hash": "e7e3fd917f967033"
         }
       ]
     },
@@ -172,27 +172,28 @@
       "step": "consensus_round",
       "will_id": 1,
       "outcome": "INACTIVE",
-      "seconds": 6.371,
-      "tx": "0xf7e6f84a8eacde6cb8765efcac119e1de50084366e78d2ce919d54aec233c5c5",
+      "seconds": 8.213,
+      "tx": "0xc38fce30d976583a192dc5644ee12e758b0c7a849e9f1b83d85e76a867390970",
       "evidence": {
         "claim_attempts": 1,
-        "last_claim_at": 1789754305,
-        "reason": "No sign of life: the polygon explorer shows no transaction signed by this wallet since the owner's last heartbeat. The newest signature is over six months old, or absent entirely, and no signature was found at all in the last 10 transactions examined. Inbound transfers were ignored: only a signature proves the key holder is present.",
+        "last_claim_at": 1789994569,
+        "reason": "No sign of life: the polygon explorer shows no transaction signed by this wallet since the owner's last heartbeat. The newest signature is over six months old, or absent entirely, and no signature was found at all in the last 50 transactions examined. Only transactions this wallet SIGNED were counted, over history covering the whole period since that check-in: inbound transfers can neither prove life nor hide it.",
         "activity_status": "INACTIVE",
         "age_bucket": 7,
         "age_meaning": "over six months old, or absent entirely",
         "count_bucket": 0,
         "count_meaning": "no signature was found at all",
         "src_ok": true,
-        "content_hash": "43feae0a7f5cd9d5",
-        "anchor_ts": 1789754121,
-        "checked_at": 1789754305,
-        "window": 10,
+        "cov_ok": true,
+        "content_hash": "e7e3fd917f967033",
+        "anchor_ts": 1789994386,
+        "checked_at": 1789994569,
+        "window": 50,
         "chain": "polygon"
       },
-      "reason": "No sign of life: the polygon explorer shows no transaction signed by this wallet since the owner's last heartbeat. The newest signature is over six months old, or absent entirely, and no signature was found at all in the last 10 transactions examined. Inbound transfers were ignored: only a signature proves the key holder is present.",
+      "reason": "No sign of life: the polygon explorer shows no transaction signed by this wallet since the owner's last heartbeat. The newest signature is over six months old, or absent entirely, and no signature was found at all in the last 50 transactions examined. Only transactions this wallet SIGNED were counted, over history covering the whole period since that check-in: inbound transfers can neither prove life nor hide it.",
       "settlement": {
-        "executed_at": 1789754305,
+        "executed_at": 1789994569,
         "finder": "0xCC84Ac0efF95D4409Fbf0A8f0f1C60E54AC1e41d",
         "finder_fee_bps": 500,
         "paid_beneficiary_wei": "7600000000000000000",
@@ -208,8 +209,8 @@
         {
           "check": "content_hash re-derives from the stored vector",
           "ok": true,
-          "stored": "43feae0a7f5cd9d5",
-          "recomputed": "43feae0a7f5cd9d5"
+          "stored": "e7e3fd917f967033",
+          "recomputed": "e7e3fd917f967033"
         },
         {
           "check": "the stored reasoning recomposes from the stored vector",
@@ -227,17 +228,17 @@
           "to_finder_wei": "400000000000000000"
         },
         {
-          "check": "a release was authorised by an INACTIVE reading from a source that answered",
+          "check": "a release was authorised by an INACTIVE reading from a source that answered, over history that reached back past the last check-in",
           "ok": true
         }
       ],
-      "canonical_projection": "v1.0.0|will=1|chain=polygon|wallet=0x73700819747517ead7acebf4de8211fe0e047ebd|anchor=1789754121|now=1789754305|window=10|status=INACTIVE|age=7|count=0|src=1"
+      "canonical_projection": "v1.1.0|will=1|chain=polygon|wallet=0x73700819747517ead7acebf4de8211fe0e047ebd|anchor=1789994386|now=1789994569|window=50|status=INACTIVE|age=7|count=0|src=1|cov=1"
     },
     {
       "step": "payouts",
       "released": true,
-      "heir_tx": "0xf161fc4761a5fc70f9035d6b031e4bf2e137488a72a3a29cbfa7005a35d804df",
-      "finder_tx": "0xa94dd420c87e144ac27b00456a6e7322cbb11fd593f2f7b1e56e5e724e9686f9",
+      "heir_tx": "0x359a3c99cdbe1855d6f4b663340448286d0fa511b67ef7252230c5ab38044eaf",
+      "finder_tx": "0x3f1a5baaedc6d068fcd9defa78d9def12b23dcfee6f265151349074dda13890c",
       "heir_pending": 1,
       "finder_pending": 1,
       "balances_moved": false,
@@ -331,7 +332,7 @@
       "failures": 0
     }
   ],
-  "finished_at": "2026-09-18T17:59:50.387Z",
+  "finished_at": "2026-09-21T12:46:12.848Z",
   "failures": 0,
   "canonical_stats": {
     "total_wills": 3,

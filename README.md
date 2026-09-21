@@ -14,9 +14,45 @@ however many check-ins you missed.
 
 That is not a design sketch. Both halves are on chain: a dormant wallet's estate
 released in [tx `0xf7e6f84a…`](docs/EVIDENCE.md), and a wallet that had signed
-one Sepolia transaction after its anchor keeping its 6 GEN in
-[tx `0xc5af390a…`](docs/EVIDENCE.md) — verdict `ALIVE`, settled in 16 seconds,
-with the validators reporting how many signatures they counted.
+one Sepolia transaction after its anchor keeping its GEN — verdict `ALIVE`,
+settled in seconds, with the validators reporting how many signatures they
+counted.
+
+### The bug this contract was rejected for, and what replaced it
+
+**A review found that the probe could read a living owner as gone.** It fetched
+the newest ten transactions of an *account* and filtered them by signer — so ten
+inbound transfers arriving after the owner's own last signature pushed that
+signature off the page, the filter found nothing, and the estate was released.
+Ten dust transfers stage it on purpose. Ordinary chain noise does it by accident:
+measured on 2026-09-21, the ten newest transactions of `vitalik.eth` are all
+inbound while its newest outbound transaction is a month old.
+
+The fix is not a bigger page — fifty inbound transfers hide a signature exactly
+as well as ten. It is two things:
+
+1. **Ask for outbound history at the source.**
+   `/api/v2/addresses/{owner}/transactions?filter=from` is server-side and
+   authoritative, so the newest entry *is* the newest signature and inbound
+   traffic cannot displace it.
+2. **Refuse to prove a negative from evidence that cannot contain it.**
+   `INACTIVE` now additionally requires `cov_ok`: the fetched history must be a
+   complete history, or must reach back past the anchor. Where two bounded
+   fetches cannot establish that, the verdict is `INCONCLUSIVE` — which changes
+   nothing and can be retried by anyone — rather than a release that cannot be
+   recalled.
+
+Only the second makes a wrong release impossible, and it holds **whether or not
+the explorer honoured the filter** — which matters, because the legacy endpoint
+measurably accepts `filterby=from` and then silently ignores it. The first is
+what keeps the contract *useful*: it is why a dormant wallet buried in inbound
+traffic still settles instead of going `INCONCLUSIVE` for ever.
+
+[**The attack is staged on a public chain in `docs/EVIDENCE.md` §10.**](docs/EVIDENCE.md)
+The owner signs, twelve inbound transfers bury it, and the two endpoints are
+asked the same question at the same instant: the rejected probe sees ten inbound
+transactions and zero signatures and concludes `INACTIVE`; the deployed probe
+sees the signature and concludes `ALIVE`. The deposit does not move.
 
 ---
 
@@ -53,8 +89,8 @@ outside world and having to agree about what they saw.**
 
 | | address |
 |---|---|
-| **WillExecutor** (canonical — the brief: 7–365 day intervals) | [`0xa3eF4Ee2a69b38d20866A80be054c79282b4c03e`](https://explorer-studio-dev.genlayer.com/) |
-| **WillExecutorDemo** (same source, clock in seconds) | [`0x766897eb88F5D7dbb2734A0501fA97eFDb3cd1d0`](https://explorer-studio-dev.genlayer.com/) |
+| **WillExecutor** (canonical — the brief: 7–365 day intervals) | [`0x8862e1CcB90529Ff7e17DC80e0A13148d3530d98`](https://explorer-studio-dev.genlayer.com/) |
+| **WillExecutorDemo** (same source, clock in seconds) | [`0xDb7ED7C86412d73D469f4f6F8148E76324fB9518`](https://explorer-studio-dev.genlayer.com/) |
 
 Two instances because the canonical contract is correct and completely
 un-watchable: the earliest a release could be demonstrated on it is fourteen
@@ -77,26 +113,50 @@ and votes on a **feature vector** — not on a verdict.
   on chain, before the round            each validator, independently
   ──────────────────────────            ─────────────────────────────
   last_heartbeat  (the anchor)   ──┐
-  owner wallet                     ├──►  GET blockscout /api?…&action=txlist
-  chain                            │          &address=<owner>&offset=10
+  owner wallet                     ├──►  GET blockscout /api/v2/addresses/
+  chain                            │        <owner>/transactions?filter=from
   block time                     ──┘                  │
+                                                      │   ← OUTBOUND ONLY,
+                                                      │     server-side
                                                       ▼
-                                          keep only tx where from == owner
+                                       count only tx signed by the owner
                                                       │
-                          ┌───────────────────────────┼───────────────────┐
-                          ▼               ▼            ▼                  ▼
-                   activity_status   age_bucket   count_bucket         src_ok
-                   ALIVE/INACTIVE/     0..7          0..7            did it answer
-                   INCONCLUSIVE      (in DAYS)   (signatures)
-                          └───────────────────────────┬───────────────────┘
+                                    ┌─────────────────┴─────────────────┐
+                                    │ found one after the anchor? ALIVE │
+                                    │ found none? then this page may    │
+                                    │ only answer if it REACHES BACK    │
+                                    │ past the anchor — else it says so │
+                                    └─────────────────┬─────────────────┘
+                                                      ▼
+                  ┌──────────────┬──────────────┬─────┴──────┬──────────┐
+                  ▼              ▼              ▼            ▼          ▼
+           activity_status   age_bucket   count_bucket    src_ok     cov_ok
+           ALIVE/INACTIVE/     0..7          0..7        did it     did it
+           INCONCLUSIVE      (in DAYS)   (signatures)    answer      reach
+                  └──────────────┴──────────────┴─────┬──────┴──────────┘
                                                       ▼
                                       content_hash = FNV-1a(canonical projection)
 ```
 
-**All five fields are compared.** A field the validators did not compare is a
+**All six fields are compared.** A field the validators did not compare is a
 field the leader can forge, and a forged `INACTIVE` empties a living person's
 estate. The contract also stores *nothing it did not compare* — there is
 deliberately no raw-body digest in storage.
+
+**`cov_ok` is the field that makes a wrong release impossible.** A page of the
+newest *account* transactions can be pushed past the anchor by inbound traffic
+the owner does not control — ten dust transfers do it on purpose, and ordinary
+chain noise does it by accident. So `ALIVE` is treated as positive evidence that
+needs no coverage, while `INACTIVE` is a negative, provable only by evidence that
+could have contained the counterexample. Where two bounded fetches cannot prove
+it, the verdict is `INCONCLUSIVE` — which changes nothing and can be retried by
+anyone.
+
+Asking the outbound-only endpoint is what keeps that from being the *usual*
+answer: it is why a dormant wallet buried in inbound traffic still settles.
+The two jobs are deliberately separate — **the endpoint makes the contract
+useful, the coverage test makes it safe** — and the coverage test holds whether
+or not the explorer honoured the filter. See `contracts/NOTES.md` §3–§4.
 
 Three design decisions are worth naming:
 
@@ -207,8 +267,8 @@ reasoning in [`contracts/NOTES.md`](contracts/NOTES.md); executable form in
 ## Running it
 
 ```bash
-python3 test/test_logic.py     # 445 offline tests — no chain, no network, stdlib only
-./tools/audit.sh               # 40 static checks, each one a past rejection
+python3 test/test_logic.py     # 494 offline tests — no chain, no network, stdlib only
+./tools/audit.sh               # 51 static checks, each one a past rejection
 ./tools/audit.sh --chain       # and assert the live deploy
 
 cd test && npm install
@@ -216,6 +276,7 @@ node accounts.mjs              # a stable pool of signing keys
 node deploy.mjs --both         # canonical + demo instance
 node seed.mjs                  # the full live lifecycle, writing docs/evidence.json
 node alive-reset.mjs && node alive.mjs   # the ALIVE path, end to end (~6 min)
+node flood.mjs                 # the rejected attack, staged on chain (~15 min)
 ```
 
 The offline suite needs nothing installed. It drives the real contract class
@@ -231,12 +292,12 @@ records nothing because on the real runner it posts no message.
 ```
 contracts/WillExecutor.py   the contract — ten rules in the header, reasoning in NOTES.md
 contracts/NOTES.md          design notes and every hazard worth knowing
-test/test_logic.py          445 offline tests + the runtime stub
+test/test_logic.py          494 offline tests + the runtime stub
 test/deploy.mjs             deploys both instances, records deployments.json
 test/seed.mjs               the live demonstration (INACTIVE → release)
 test/alive.mjs              the ALIVE demonstration (signature after the anchor → nothing moves)
 test/alive-reset.mjs        resets it so the evidence run is one clean invocation
-tools/audit.sh              40 static checks
+tools/audit.sh              51 static checks
 tools/audit_chain.mjs       asserts the live contracts, not the source
 tools/verify_artifact.mjs   proves the deployed bytes are this source
 docs/EVIDENCE.md            what happened on chain, including what did not

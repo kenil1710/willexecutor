@@ -157,16 +157,98 @@ treats "we could not ask" as "this wallet is dormant" and **pays out an
 inheritance on a typo**. `_parse` requires `isinstance(items, list)` and
 anything else is INCONCLUSIVE.
 
-### The legacy endpoint, not `/api/v2`
+### `/api/v2` with `filter=from`, and the legacy page behind it
 
-`/api/v2/addresses/{a}/transactions` returns a fixed page of 50 and **measured
-530 KB** on a busy wallet. The legacy
-`/api?module=account&action=txlist&…&offset=10` returned the same facts in
-**4.5 KB**. Every validator pays that cost on every probe, so this is not a
-micro-optimisation — it is the difference between a round that settles and one
-that times out. The legacy endpoint also stamps `timeStamp` as a Unix integer
-rather than an ISO string, so the one field the verdict turns on needs no date
-parsing and carries no timezone to disagree about.
+**This section used to say the opposite, and saying the opposite was the bug.**
+It argued for the legacy `txlist` endpoint on cost: 4.5 KB against v2's 530 KB,
+`timeStamp` as a Unix integer rather than an ISO string, and every validator
+paying that cost on every probe. All of it is still true. None of it mattered,
+because the cheap endpoint **cannot answer the question being asked**.
+
+The legacy page is the newest *N* transactions of an **account** — inbound and
+outbound together. The probe then filtered them by signer. On a wallet that
+receives more than it sends, the owner's own last signature is simply not on the
+page, the filter finds nothing, and the verdict is INACTIVE. Measured
+2026-09-21: **the ten newest transactions of `vitalik.eth` are all inbound,
+while its newest outbound transaction is a month old.** No attacker needed.
+
+So the primary source is now
+`/api/v2/addresses/{a}/transactions?filter=from`, which is **server-side and
+authoritative**: the page is outbound-only, so its newest entry is the newest
+signature that exists, and no amount of inbound traffic can push it out of view.
+Measured 2026-09-21 against all six allowlisted hosts — HTTP 200 with an `items`
+list on every one, and every returned item outbound.
+
+| | legacy `txlist` | v2 `?filter=from` |
+|---|---|---|
+| shape | mixed in/out | **outbound only** |
+| size (`vitalik.eth`) | 7 KB | 642 KB |
+| size (fresh key) | 96 B | **36 B** |
+| page size | `offset`, up to 50 | fixed 50, no parameter |
+| timestamp | `timeStamp`, Unix int | `timestamp`, ISO-8601 |
+| signer | `from`, flat hex | `from.hash`, nested |
+| refusal | `result: null`, HTTP 200 | no `items` key, HTTP 422 |
+
+**Three things follow, and each is written down because each is load-bearing.**
+
+*The filter is never depended on.* The legacy endpoint accepts `filterby=from`
+and **silently ignores it** — byte-identical response, HTTP 200, no warning
+(measured; `starttimestamp` is dropped the same way). A filter that can be
+silently dropped must not be assumed to have worked.
+
+An earlier draft of this fix handled that by counting how many returned items
+were *not* outbound and falling back whenever any were. That check is gone,
+because it was **redundant with something stronger**: a page of outbound
+transactions with nothing after the anchor has every one of its entries at or
+before the anchor, so the coverage test below already reaches the same
+conclusion — and in one case, a page whose timestamps are all unreadable, the
+shortcut said *"covered"* where coverage says *"ask again"*.
+
+So there is no shortcut. **Coverage is proved from the page itself, identically
+whichever endpoint returned it and whether or not the filter was honoured.**
+`filter=from` is what makes the answer *useful* — it is why a dormant wallet
+buried in inbound traffic settles instead of going INCONCLUSIVE for ever. It is
+not what makes the answer *safe*.
+
+*The legacy page is kept as a fallback, and it is safe there.* When v2 returns
+nothing readable, a quiet wallet's **short page is a complete history**, and
+that is the ordinary estate case. `_covers` is what makes it safe: a mixed page
+may only answer if it is short, or if it reaches back past the anchor.
+
+*`TX_WINDOW` is 50 because v2's page is 50.* This is not a tuning knob. If it
+were larger, a full 50-item v2 page would satisfy `len(items) < requested`, be
+read as a complete history, and hand the flood its old result back through the
+coverage check instead of through the filter. There is an audit check pinning
+it, and it exists so nobody "optimises" it later.
+
+### Coverage: the burden of proof is not symmetric
+
+ALIVE and INACTIVE are not two sides of one coin, and the probe does not treat
+them as such.
+
+**ALIVE is positive evidence.** One signature after the anchor proves it, and it
+does not matter how far back the page reaches — anything found is found.
+
+**INACTIVE is a negative**, and a negative is only proved by evidence that could
+have contained the counterexample. A page proves it in exactly two situations:
+
+- it is **shorter** than what was asked for, so it is the whole history; or
+- its **oldest entry is at or before the anchor**, so the page spans the
+  boundary and anything after the anchor would have to be on it.
+
+Anything else is INCONCLUSIVE — which changes nothing and can be retried by
+anybody, where INACTIVE pays out an estate that cannot be recalled. That
+asymmetry is the whole argument, and `cov_ok` puts it on the consensus axis so
+no single leader can assert it alone.
+
+**There is no pagination loop, and that is deliberate.** Walking back page by
+page until the anchor is covered is the obvious alternative, and on this network
+it is self-defeating: `eth.blockscout.com` answers 429 at roughly the third
+rapid request from one address, and a round fires one probe *per validator*
+simultaneously from one datacentre range. A five-page walk would rate-limit
+every round into a permanent INCONCLUSIVE — the failure mode would be total
+rather than rare. The bound is **two fetches**, and where two fetches cannot
+prove the negative the contract says so instead of guessing.
 
 ### The allowlist is measured, and a chain added blind is a chain that never pays
 
@@ -213,9 +295,34 @@ refunds, spam. If an inbound transfer counted as a heartbeat then **any stranger
 could keep any will locked for ever for the price of one wei**, and the attack
 is cheap, repeatable and indistinguishable from ordinary chain noise.
 
-Only the key holder can sign. So `_probe` filters on `from == owner` and
-`count_bucket` counts signatures only. `TestProbe.test_inbound_only_is_inactive`
-buries a wallet in ten inbound transfers and requires it still read INACTIVE.
+Only the key holder can sign. So `_probe` counts only transactions where
+`from == owner`, and `count_bucket` counts signatures only.
+`TestProbe.test_inbound_only_is_inactive` buries a wallet in ten inbound
+transfers and requires it still read INACTIVE.
+
+### Filtering a page by signer is not the same as fetching a page of signatures
+
+**This is the distinction the first two versions of this contract missed, and it
+is the whole of the rejection.**
+
+Rule 9 was implemented as a client-side filter over a mixed page, and a filter
+over the wrong page is not a filter — it is a sampling error with a confident
+answer attached. The sequence:
+
+1. the owner signs a transaction — they are **alive**;
+2. ten inbound transfers arrive afterwards;
+3. the validator fetches the ten newest transactions of the account;
+4. all ten are inbound, so the filter yields nothing;
+5. verdict INACTIVE, **and the estate is released.**
+
+Ten dust transfers stage it deliberately. Ordinary chain noise stages it by
+accident. The fix is not a bigger window — fifty inbound transfers hide a
+signature exactly as well as ten — it is **asking the explorer for outbound
+history in the first place**, and refusing to answer when the evidence in hand
+cannot reach the question. See §3 above, `_covers`, and `TestInboundFlood`,
+which stages the reviewer's scenario verbatim and includes a regression oracle
+that reimplements the old algorithm in four lines and asserts that it gets the
+wrong answer.
 
 The same reasoning is why `top_up` and `change_beneficiary` reset the timer:
 both are messages signed by the owner's own key, so both are proof of life. An
